@@ -91,6 +91,24 @@ MIGRATIONS: list[str] = [
     CREATE INDEX restarts_service_ts ON restarts(service, ts);
     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     """,
+    # 2: the family bus mirrored from the Hoard Hub (agent calls, app milestones, hub actions)
+    """
+    CREATE TABLE bus_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hub_id INTEGER NOT NULL UNIQUE,
+      ts REAL NOT NULL,
+      type TEXT NOT NULL,
+      source TEXT NOT NULL,
+      tool TEXT,
+      ok INTEGER,
+      ms REAL,
+      caller TEXT,
+      data TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX bus_events_ts ON bus_events(ts);
+    CREATE INDEX bus_events_type_ts ON bus_events(type, ts);
+    CREATE INDEX bus_events_source_ts ON bus_events(source, ts);
+    """,
 ]
 
 

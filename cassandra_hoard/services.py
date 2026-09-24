@@ -8,6 +8,7 @@ import time
 from typing import Any, Callable, Optional
 
 from . import SERVICE, __version__
+from .audit import BusMirror
 from .config import Config
 from .db import Database
 from .gpu import GpuReader
@@ -41,7 +42,7 @@ def write_url(config: Config) -> None:
 
 class Services:
     def __init__(self, config: Config, *, clock_fn: Callable[[], float] = time.time, poller_kwargs: Optional[dict[str, Any]] = None,
-                 restarter_kwargs: Optional[dict[str, Any]] = None):
+                 restarter_kwargs: Optional[dict[str, Any]] = None, bus_kwargs: Optional[dict[str, Any]] = None):
         self.config = config
         self.clock = clock_fn
         self.started_at = time.time()
@@ -58,6 +59,16 @@ class Services:
         if "gpu_reader" not in kwargs and config.gpu:
             kwargs["gpu_reader"] = GpuReader()
         self.poller = Poller(config, self.db, self.registry, self.logs, self.incidents, self.restarter, clock_fn=clock_fn, **kwargs)
+        # The family bus, mirrored for good: what the assistant and the apps did.
+        self.bus = BusMirror(self.db, config.hub_url, clock_fn=clock_fn, incidents=self.incidents, emit=self._emit_event,
+                             **(bus_kwargs or {}))
+
+    def _emit_event(self, type_: str, data: dict[str, Any]) -> None:
+        try:
+            from .hoard_link import family
+            family.emit(type_, data)
+        except Exception:  # noqa: BLE001
+            pass
 
     def name_of(self, service_id: str) -> str:
         if service_id == "system":
@@ -69,8 +80,11 @@ class Services:
     def start(self) -> None:
         if self.config.autostart:
             self.poller.start()
+            if self.config.bus:
+                self.bus.start()
 
     def stop(self) -> None:
+        self.bus.stop()
         self.poller.stop()
         self.db.close()
 
@@ -117,6 +131,7 @@ class Services:
             "gpu": {"available": bool(self.poller.gpu_now), "now": self.poller.gpu_now,
                     "error": getattr(gpu_reader, "error", None) if self.config.gpu else "disabled (CASSANDRA_GPU=0)"},
             "logs": self.logs.counts(),
+            "bus": self.bus.status(),
             "auto_restart": self.config.auto_restart,
             "registry_error": self.registry.load_error,
             "roots": list(self.config.roots),

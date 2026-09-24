@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from .. import SERVICE, __version__, views
 from ..times import iso, window
 from .deps import services
+from ..hoard_link import family
 
 router = APIRouter(prefix="/api")
 
@@ -29,7 +30,8 @@ def _service(svc, text: str):
 
 @router.get("/health")
 def health(request: Request):
-    return {"service": SERVICE, "version": __version__, "dataDirConfigured": request.app.state.config.data_dir_configured}
+    return {"service": SERVICE, "version": __version__, "dataDirConfigured": request.app.state.config.data_dir_configured,
+            "hoard_link": family.health_block()}
 
 
 @router.get("/status")

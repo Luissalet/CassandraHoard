@@ -14,7 +14,10 @@ def call(client, name, **arguments):
 
 
 def test_health_status_and_local_only(client):
-    assert client.get("/api/health").json() == {"service": "cassandra-hoard", "version": "0.1.0", "dataDirConfigured": True}
+    health = client.get("/api/health").json()
+    family_block = health.pop("hoard_link")
+    assert health == {"service": "cassandra-hoard", "version": "0.1.0", "dataDirConfigured": True}
+    assert family_block["family"] and family_block["app"] == "cassandra" and "events" in family_block
     assert client.get("/api/health", headers={"host": "evil.example"}).status_code == 403
     assert client.get("/api/nope").status_code == 404
     client.h.tick()
@@ -79,7 +82,7 @@ def test_settings_watch_policy_restart(client):
 def test_agent_catalogue_schema(client):
     catalog = client.get("/api/agent/tools").json()
     names = [t["name"] for t in catalog["tools"]]
-    assert names == ["svc_status", "svc_incidents", "svc_why_down", "logs_search", "gpu_timeline", "svc_history", "svc_restart", "svc_watch"]
+    assert names == ["svc_status", "svc_incidents", "svc_why_down", "logs_search", "gpu_timeline", "svc_history", "audit_search", "audit_stats", "secrets_audit", "svc_restart", "svc_watch"]
     assert "never restart" in catalog["instructions"] and "04:00" in catalog["instructions"]
     for tool in catalog["tools"]:
         first = tool["description"].split("\n", 1)[0]

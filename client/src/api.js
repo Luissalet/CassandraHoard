@@ -36,4 +36,8 @@ export const api = {
   policy: (id, body) => request("PUT", `/api/services/${encodeURIComponent(id)}/policy`, { body }),
   restart: (id) => request("POST", `/api/services/${encodeURIComponent(id)}/restart`),
   poll: () => request("POST", "/api/poll"),
+  audit: (params) => request("GET", "/api/audit", { params }),
+  auditStats: (params) => request("GET", "/api/audit/stats", { params }),
+  auditSync: () => request("POST", "/api/audit/sync"),
+  secrets: () => request("GET", "/api/secrets"),
 };

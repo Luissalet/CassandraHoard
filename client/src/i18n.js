@@ -6,7 +6,21 @@ const DICT = {
     nav_incidents: "Incidencias",
     nav_gpu: "GPU",
     nav_logs: "Logs",
+    nav_audit: "Auditoría",
     nav_services: "Servicios",
+    audit_intro: "Qué hizo el asistente y las apps: el bus de eventos del Hoard Hub, espejado aquí para siempre.",
+    audit_placeholder: "Palabras en el tipo, la app o los datos",
+    audit_type: "Tipo (scribe.*, agent.call)",
+    audit_source: "App",
+    audit_failed: "Solo fallos",
+    audit_no_events: "Sin eventos en ese intervalo.",
+    audit_stats: "Llamadas del agente (7 días)",
+    audit_col_app: "app", audit_col_tool: "herramienta", audit_col_count: "llamadas", audit_col_failed: "fallos", audit_col_avg: "media ms", audit_col_max: "máx ms",
+    audit_sync: "Sincronizar ahora",
+    audit_bus: (b) => `hub ${b.hub_url} · ${b.stored} eventos guardados${b.last_error ? " · " + b.last_error : ""}`,
+    secrets_title: "Secretos",
+    secrets_run: "Auditar secretos",
+    secrets_ok: "Sin problemas en las carpetas revisadas.",
     unreachable: "No se pudo contactar con Cassandra",
     retry: "Reintentar",
     check_now: "Comprobar ahora",
@@ -105,7 +119,21 @@ const DICT = {
     nav_incidents: "Incidents",
     nav_gpu: "GPU",
     nav_logs: "Logs",
+    nav_audit: "Audit",
     nav_services: "Services",
+    audit_intro: "What the assistant and the apps did: the Hoard Hub's event bus, mirrored here for good.",
+    audit_placeholder: "Words in the type, the app or the data",
+    audit_type: "Type (scribe.*, agent.call)",
+    audit_source: "App",
+    audit_failed: "Failures only",
+    audit_no_events: "No events in that window.",
+    audit_stats: "Agent calls (7 days)",
+    audit_col_app: "app", audit_col_tool: "tool", audit_col_count: "calls", audit_col_failed: "failed", audit_col_avg: "avg ms", audit_col_max: "max ms",
+    audit_sync: "Sync now",
+    audit_bus: (b) => `hub ${b.hub_url} · ${b.stored} events kept${b.last_error ? " · " + b.last_error : ""}`,
+    secrets_title: "Secrets",
+    secrets_run: "Audit secrets",
+    secrets_ok: "No problems in the folders checked.",
     unreachable: "Could not reach Cassandra",
     retry: "Retry",
     check_now: "Check now",
@@ -223,6 +251,7 @@ export function makeT(lang) {
   return (key, vars) => {
     let value = key.split(".").reduce((node, part) => (node && node[part] !== undefined ? node[part] : undefined), dict);
     if (value === undefined) return key;
+    if (typeof value === "function") return value(vars);
     if (typeof value === "string" && vars) {
       for (const [name, v] of Object.entries(vars)) value = value.replaceAll(`{${name}}`, v);
     }

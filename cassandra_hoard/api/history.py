@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .. import views
+from ..audit import secrets_audit
 from ..incidents import explain
 from ..times import iso
 from .deps import services
@@ -66,3 +67,38 @@ def gpu(request: Request, since: Optional[str] = None, until: Optional[str] = No
     svc = services(request)
     start, end = _window(since, until, at, window_min, 24, svc.clock())
     return views.gpu_timeline(svc.db, start, end, gpu, points)
+
+
+@router.get("/audit")
+def audit(request: Request, q: str = "", type: Optional[str] = None, source: Optional[str] = None, tool: Optional[str] = None,
+          failed: bool = False, since: Optional[str] = None, until: Optional[str] = None, at: Optional[str] = None,
+          window_min: float = Query(15, ge=1, le=1440), limit: int = Query(200, ge=1, le=500)):
+    """The family bus mirrored from the hub (agent calls, app events, hub actions)."""
+    svc = services(request)
+    start, end = _window(since, until, at, window_min, 24, svc.clock())
+    kwargs = {"query": q, "type": type, "source": source, "tool": tool, "since": start, "until": end, "limit": limit}
+    if failed:
+        kwargs["ok"] = False
+        kwargs["type"] = type or "agent.call"
+    return {"since": iso(start), "until": iso(end), "events": svc.bus.search(**kwargs), "bus": svc.bus.status()}
+
+
+@router.get("/audit/stats")
+def audit_stats(request: Request, since: Optional[str] = None, until: Optional[str] = None, at: Optional[str] = None,
+                window_min: float = Query(15, ge=1, le=1440)):
+    svc = services(request)
+    start, end = _window(since, until, at, window_min, 24 * 7, svc.clock())
+    return {"since": iso(start), "until": iso(end), **svc.bus.stats(start, end), "bus": svc.bus.status()}
+
+
+@router.post("/audit/sync")
+def audit_sync(request: Request):
+    svc = services(request)
+    return {"synced": svc.bus.sync_once(), "bus": svc.bus.status()}
+
+
+@router.get("/secrets")
+def secrets(request: Request, service: Optional[str] = None):
+    svc = services(request)
+    targets = [_service(svc, service)] if service else svc.registry.list()
+    return secrets_audit(targets, now=svc.clock())

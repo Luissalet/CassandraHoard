@@ -8,6 +8,7 @@ from typing import Any, Callable, Optional
 from pydantic import BaseModel, Field
 
 from . import views
+from .audit import secrets_audit
 from .incidents import explain
 from .poller import OK_STATES
 from .services import Services
@@ -60,6 +61,23 @@ class GpuArgs(WindowArgs):
 
 class HistoryArgs(WindowArgs):
     service: str = Field(..., min_length=1, max_length=120, description="Service id, name or port.")
+
+
+class AuditSearchArgs(WindowArgs):
+    query: str = Field("", max_length=300, description="Words that must appear in the event (type, source or data).")
+    type: Optional[str] = Field(None, max_length=120, description="Event type glob, e.g. agent.call, scribe.*, hub.backup.*; | joins several.")
+    source: Optional[str] = Field(None, max_length=60, description="Only events from this app id (or 'hub').")
+    tool: Optional[str] = Field(None, max_length=100, description="Only agent.call events for this tool.")
+    failed: bool = Field(False, description="Only failed agent calls.")
+    limit: int = Field(50, ge=1, le=500)
+
+
+class AuditStatsArgs(WindowArgs):
+    pass
+
+
+class SecretsArgs(BaseModel):
+    service: Optional[str] = Field(None, max_length=120, description="Only this app (id, name or port); omit for every app folder.")
 
 
 class RestartArgs(BaseModel):
@@ -168,10 +186,12 @@ def run_why(services: Services, args: WhyArgs) -> dict:
         text += f" (since {clock(state['since'])})." if state.get("since") else "."
         return {"service": service.id, "name": service.name, "state": state["state"], "incident": None, "explanation": [text]}
     ctx = item["context"]
+    bus_around = [_brief_event(e) for e in services.bus.around(item["opened_at"], 3.0, 20)]
     return {
         "service": service.id, "name": service.name, "state_now": state["state"],
         "incident": _brief_incident(services, item, now),
         "explanation": explain(item, service.name, service.port, now),
+        "bus_events_around": bus_around,
         "causes": [c["text"] for c in ctx.get("causes", [])],
         "process": ctx.get("process"),
         "log_tail": [f"{clock(line['ts'])} {line['line'][:300]}" for line in (ctx.get("log_tail") or [])[-12:]],
@@ -218,6 +238,58 @@ def run_history(services: Services, args: HistoryArgs) -> dict:
             "segments": [{"from": iso(a), "to": iso(b), "state": st, "duration": duration(b - a)} for a, b, st in lane][-50:]}
 
 
+def _brief_event(e: dict[str, Any]) -> dict[str, Any]:
+    out = {"at": iso(e["ts"]), "type": e["type"], "source": e["source"]}
+    if e.get("tool"):
+        out["tool"] = e["tool"]
+    if e.get("ok") is not None:
+        out["ok"] = e["ok"]
+    if e.get("ms") is not None:
+        out["ms"] = e["ms"]
+    if e.get("caller"):
+        out["caller"] = e["caller"]
+    data = {k: v for k, v in (e.get("data") or {}).items() if k not in ("tool", "ok", "ms", "caller")}
+    if data:
+        out["data"] = data
+    return out
+
+
+def run_audit_search(services: Services, args: AuditSearchArgs) -> dict:
+    now = services.clock()
+    since, until = window(args.since, args.until, args.at, args.window_min, default_hours=24, now=now)
+    kwargs: dict[str, Any] = {"query": args.query, "type": args.type, "source": args.source, "tool": args.tool,
+                              "since": since, "until": until, "limit": args.limit}
+    if args.failed:
+        kwargs["ok"] = False
+        kwargs["type"] = kwargs["type"] or "agent.call"
+    events = services.bus.search(**kwargs)
+    st = services.bus.status()
+    note = None
+    if not events:
+        note = "No event in that window." + (f" The hub bus is not reachable ({st['last_error']}); Cassandra keeps what it mirrored." if st.get("last_error") else "")
+    return {"since": iso(since), "until": iso(until), "count": len(events), "events": [_brief_event(e) for e in events],
+            "bus": {"hub": st["hub_url"], "stored": st["stored"], "last_sync": iso(st["last_sync"]) if st["last_sync"] else None, "error": st["last_error"]},
+            "note": note}
+
+
+def run_audit_stats(services: Services, args: AuditStatsArgs) -> dict:
+    now = services.clock()
+    since, until = window(args.since, args.until, args.at, args.window_min, default_hours=24 * 7, now=now)
+    data = services.bus.stats(since, until)
+    data["recent_failures"] = [_brief_event(e) for e in data["recent_failures"]]
+    data.update({"since": iso(since), "until": iso(until), "bus": services.bus.status()})
+    return data
+
+
+def run_secrets(services: Services, args: SecretsArgs) -> dict:
+    now = services.clock()
+    targets = [services.resolve(args.service)] if args.service else services.registry.list()
+    report = secrets_audit(targets, now=now)
+    if not report["checked"]:
+        report["note"] = "No app folder to audit (only apps discovered from a faustus-plugin.json have a folder)."
+    return report
+
+
 def run_restart(services: Services, args: RestartArgs) -> dict:
     service = services.resolve(args.service)
     cur = services.poller.current.get(service.id)
@@ -257,6 +329,9 @@ TOOLS: list[Tool] = [
     Tool("logs_search", "Search the logs of every local service by words, service and time / Buscar en los logs por texto y hora\nLines tailed from each app's data/logs, the launcher's logs and configured files, with time and level (error, warning, info). Use at='04:00' to read what happened around a moment.\nSinónimos: logs, registros, trazas, error, traceback, buscar en logs, qué dijo, mensajes.", LogsArgs, _ann(True), run_logs),
     Tool("gpu_timeline", "GPU memory and load over time, peaks and which GPU is free now / Memoria de GPU en el tiempo, cuál está libre\nCompact series per GPU (mem % max/avg, util % max) from nvidia-smi samples, peak moments, current free memory and the freest GPU.\nSinónimos: GPU, VRAM, memoria de vídeo, tarjeta gráfica, libre, ocupada, carga, nvidia, picos.", GpuArgs, _ann(True), run_gpu),
     Tool("svc_history", "Up/down timeline of one service: state changes and uptime / Historial de estados de un servicio\nState at the start of the window, every change (state, pid restart, restart action) with its time, segments and uptime percentage.\nSinónimos: historial, cronología, cuándo estuvo caído, disponibilidad, uptime, cambios de estado.", HistoryArgs, _ann(True), run_history),
+    Tool("audit_search", "What the assistant and the apps did: agent calls and app events by time / Qué hizo el asistente, auditoría\nThe family bus mirrored from the Hoard Hub: one agent.call per tool run (app, tool, ok, ms, who asked), app milestones (scribe.transcript.done, links.watch.new), hub actions (backups, rules, starts). Filter by words, type glob, app, tool, failures, and time (at='03:12').\nSinónimos: auditoría, qué hizo, quién llamó, historial de acciones, eventos, llamadas del agente, qué pasó justo antes.", AuditSearchArgs, _ann(True), run_audit_search),
+    Tool("audit_stats", "Counts of agent calls per app and tool, failures, slowest, busiest callers / Estadísticas de uso del agente\nOver a window (default 7 days): events by type and source, agent.call per app/tool with failed count and avg/max ms, callers, and the last failures.\nSinónimos: estadísticas, cuántas veces, herramienta más usada, fallos, uso del agente, resumen de actividad.", AuditStatsArgs, _ann(True), run_audit_stats),
+    Tool("secrets_audit", "Leaked secrets in app folders: tokens, data/ ignored, tracked .env or db / Auditoría de secretos\nPer app: token file present (and its permissions), data/ in .gitignore, secret-looking files tracked by git (mcp-token, .env, *.key, databases), .env files. Read-only.\nSinónimos: secretos, tokens, fugas, .env, gitignore, seguridad, qué está en git, credenciales.", SecretsArgs, _ann(True), run_secrets),
     Tool("svc_restart", "Restart or start one service now (only when the user asks) / Reiniciar o arrancar un servicio ahora\nUses its restart command, the Hoard Hub launcher or the app's launch hint; recorded in the open incident. Refuses when another program holds the port.\nSinónimos: reiniciar, arrancar, levantar, relanzar, volver a encender, restart, start.", RestartArgs, _ann(False, False, False), run_restart),
     Tool("svc_watch", "Add or edit a watched service: URL, health path, logs, restart policy / Añadir o editar un servicio vigilado\nSaved in data/services.json. An existing id (also a discovered app or built-in) is edited; restart.enabled turns on automatic restarts (opt-in, max_per_hour). Only when the user asks.\nSinónimos: vigilar, monitorizar, añadir servicio, nuevo servicio, política de reinicio, logs de un servicio.", WatchArgs, _ann(False, False, True), run_watch),
 ]

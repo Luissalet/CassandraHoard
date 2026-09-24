@@ -5,6 +5,7 @@ import Panel from "./pages/Panel.jsx";
 import Incidents from "./pages/Incidents.jsx";
 import Gpu from "./pages/Gpu.jsx";
 import Logs from "./pages/Logs.jsx";
+import Audit from "./pages/Audit.jsx";
 import Settings from "./pages/Settings.jsx";
 
 const PAGES = [
@@ -12,6 +13,7 @@ const PAGES = [
   { path: "incidents", key: "nav_incidents", icon: "M12 3l9 16H3zM12 10v4M12 17h.01", component: Incidents },
   { path: "gpu", key: "nav_gpu", icon: "M4 7h16v10H4zM8 7V4M16 7V4M8 20v-3M16 20v-3", component: Gpu },
   { path: "logs", key: "nav_logs", icon: "M5 5h14M5 10h14M5 15h9M5 20h6", component: Logs },
+  { path: "audit", key: "nav_audit", icon: "M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7zM9 12l2 2 4-4", component: Audit },
   { path: "services", key: "nav_services", icon: "M12 15a3 3 0 100-6 3 3 0 000 6zM19 12l2-1-1-3-2 .3-1.4-1.4.3-2-3-1-1 2h-2l-1-2-3 1 .3 2L6.8 7.3 5 7 4 10l2 1v2l-2 1 1 3 2-.3 1.4 1.4-.3 2 3 1 1-2h2l1 2 3-1-.3-2 1.4-1.4 2 .3 1-3-2-1z", component: Settings },
 ];
 
