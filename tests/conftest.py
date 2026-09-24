@@ -106,7 +106,8 @@ def write_manifest(root: Path, folder: str, app_id: str, port: int, service: str
 
 def make_config(tmp_path: Path, **overrides) -> Config:
     base = dict(data_dir=tmp_path / "data", roots=[str(tmp_path / "apps")], externals=False, gpu=False, autostart=False,
-                default_logs=False, data_dir_configured=True, poll_s=20.0, sample_every_s=60.0)
+                default_logs=False, data_dir_configured=True, poll_s=20.0, sample_every_s=60.0,
+                hub_registry=False)  # hermetic: registry tests scan manifests; the hub path has its own test
     base.update(overrides)
     return Config(**base)
 
@@ -144,6 +145,8 @@ class Harness:
                                alive_fn=lambda pid, started=None: self.alive.get(pid), boot_fn=lambda: self.boot,
                                gpu_reader=self.gpu, restart_async=False),
             restarter_kwargs=dict(hub_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599))), spawn=spawn),
+            # hermetic: the real hub may be running on this machine
+            registry_kwargs=dict(hub_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599)))),
         )
 
     def proc(self, pid):

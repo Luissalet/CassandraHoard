@@ -68,6 +68,7 @@ class Config:
     autostart: bool = True  # start the poller with the app
     port_check: bool = True  # look at listening ports (psutil) before probing
     bus: bool = True  # mirror the Hoard Hub's event bus (the audit trail)
+    hub_registry: bool = True  # take the app list from the hub when it answers (scan manifests otherwise)
     allowed_hosts: tuple[str, ...] = ()
     data_dir_configured: bool = False
 
@@ -117,6 +118,7 @@ class Config:
             autostart=_env("CASSANDRA_AUTOSTART", "1") != "0",
             port_check=_env("CASSANDRA_PORT_CHECK", "1") != "0",
             bus=_env("CASSANDRA_BUS", "1") != "0",
+            hub_registry=_env("CASSANDRA_HUB_REGISTRY", "1") != "0",
             allowed_hosts=parse_allowed_hosts(_env("CASSANDRA_ALLOWED_HOSTS")),
             data_dir_configured=bool(raw_dir),
         )

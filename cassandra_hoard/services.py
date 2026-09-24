@@ -42,7 +42,8 @@ def write_url(config: Config) -> None:
 
 class Services:
     def __init__(self, config: Config, *, clock_fn: Callable[[], float] = time.time, poller_kwargs: Optional[dict[str, Any]] = None,
-                 restarter_kwargs: Optional[dict[str, Any]] = None, bus_kwargs: Optional[dict[str, Any]] = None):
+                 restarter_kwargs: Optional[dict[str, Any]] = None, bus_kwargs: Optional[dict[str, Any]] = None,
+                 registry_kwargs: Optional[dict[str, Any]] = None):
         self.config = config
         self.clock = clock_fn
         self.started_at = time.time()
@@ -51,7 +52,7 @@ class Services:
         self.token = write_token(config)
         write_url(config)
         self.db = Database(config.db_path)
-        self.registry = Registry(config)
+        self.registry = Registry(config, **(registry_kwargs or {}))
         self.logs = LogStore(self.db, config, self.registry.list, clock_fn)
         self.incidents = Incidents(self.db, self.logs, self.name_of, clock_fn)
         self.restarter = Restarter(self.db, config, self.registry, self.incidents, clock_fn, **(restarter_kwargs or {}))
@@ -134,5 +135,6 @@ class Services:
             "bus": self.bus.status(),
             "auto_restart": self.config.auto_restart,
             "registry_error": self.registry.load_error,
+            "registry_source": self.registry.source,
             "roots": list(self.config.roots),
         }

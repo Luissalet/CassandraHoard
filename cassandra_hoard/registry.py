@@ -317,15 +317,71 @@ def validate_user_entry(raw: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-class Registry:
-    """The merged, thread-safe list of services; reloaded on demand."""
+def hub_apps(hub_url: str, *, client: Any = None, timeout: float = 4.0) -> Optional[list[Service]]:
+    """The apps the Hoard Hub knows (``GET <hub>/api/apps``) as services, or
+    None when no hub answers. One source of truth for "which apps exist":
+    the hub already scanned the manifests, resolved the placeholders and
+    found the icons, so Cassandra takes its list instead of doing the same
+    work again (and disagreeing about it). ``client`` is an ``httpx.Client``
+    (tests pass a mocked one)."""
+    import httpx
+    own = client is None
+    http = client or httpx.Client(timeout=timeout, trust_env=False)
+    try:
+        resp = http.get(f"{hub_url.rstrip('/')}/api/apps", timeout=timeout)
+        if resp.status_code != 200:
+            return None
+        body = resp.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    finally:
+        if own:
+            http.close()
+    if not isinstance(body, dict) or body.get("service") != "hoard-hub" or not isinstance(body.get("apps"), list):
+        return None
+    out: list[Service] = []
+    for a in body["apps"]:
+        if not isinstance(a, dict) or not a.get("id") or not a.get("url"):
+            continue
+        app_id = str(a["id"]).lower()
+        if app_id == SELF_ID:
+            continue
+        expect = {"service": a["expect_service"]} if a.get("expect_service") else {}
+        health_path = "/api/health"
+        hu = str(a.get("health_url") or "")
+        if hu.startswith(str(a["url"])):
+            health_path = hu[len(str(a["url"])):] or "/api/health"
+        launch = None
+        raw_launch = a.get("launch")
+        if isinstance(raw_launch, dict) and a.get("launchable") and raw_launch.get("executable"):
+            launch = LaunchSpec(str(raw_launch["executable"]), [str(x) for x in raw_launch.get("argv") or []], str(raw_launch.get("cwd") or a.get("folder") or ""))
+        folder = str(a.get("folder") or "")
+        s = Service(app_id, str(a.get("name") or app_id), "app", str(a["url"]).rstrip("/"), health_path, expect, _group_for(app_id),
+                    launch=launch, launch_reason="" if launch else str(a.get("launch_reason") or "the hub cannot start it"),
+                    folder=folder, purpose=str(a.get("purpose") or ""))
+        if folder:
+            s.log_globs = [str(Path(folder, "data", "logs", "*.log"))]
+            url_file = _read_url_file(folder)
+            if url_file:
+                s.url = url_file
+        out.append(s)
+    return out
 
-    def __init__(self, config):
+
+class Registry:
+    """The merged, thread-safe list of services; reloaded on demand.
+
+    Discovery asks the Hoard Hub first (``hub_apps``) and scans the
+    manifests itself only when no hub answers; ``source`` says which."""
+
+    def __init__(self, config, *, hub_client: Any = None):
         self.config = config
+        self._hub_client = hub_client
         self._lock = threading.RLock()
         self._services: dict[str, Service] = {}
         self._file: dict[str, Any] = {"services": [], "policies": {}}
         self.load_error: str | None = None
+        self.source: str = "manifests"
         self.reload()
 
     # ---------- file ----------
@@ -365,7 +421,14 @@ class Registry:
         with self._lock:
             self._file = self._read_file()
             merged: dict[str, Service] = {}
-            discovered = scan(self.config.roots, faustus_python=self.config.faustus_python or None)
+            discovered = None
+            if getattr(self.config, "hub_registry", True):
+                discovered = hub_apps(self.config.hub_url, client=self._hub_client)
+            if discovered is not None:
+                self.source = "hub"
+            else:
+                self.source = "manifests"
+                discovered = scan(self.config.roots, faustus_python=self.config.faustus_python or None)
             ports = {s.port for s in discovered if s.is_local}
             for s in discovered:
                 merged[s.id] = s

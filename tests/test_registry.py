@@ -4,6 +4,7 @@ import json
 import sys
 
 import pytest
+import httpx
 from conftest import make_config, write_manifest
 
 from cassandra_hoard.registry import Registry, builtin_externals, read_manifest, resolve_placeholders, validate_user_entry
@@ -85,3 +86,40 @@ def test_validation_and_broken_file(tmp_path):
     assert [s.id for s in registry.list()] == ["a"] and "b a d" in registry.load_error
     config.services_path.write_text("{broken", encoding="utf-8")
     assert Registry(config).load_error.startswith("services.json")
+
+
+def test_registry_takes_the_hub_list_when_the_hub_answers(tmp_path):
+    """One source of truth for "which apps exist": the hub's /api/apps, with
+    a fallback to scanning manifests when no hub answers."""
+    from cassandra_hoard.registry import Registry, hub_apps
+    apps = [
+        {"id": "links", "name": "Links Hoard", "purpose": "read later", "folder": str(tmp_path / "Links Hoard"),
+         "url": "http://127.0.0.1:5181", "health_url": "http://127.0.0.1:5181/api/health", "expect_service": "links-hoard",
+         "launchable": True, "launch": {"executable": "node", "argv": ["server/index.js"], "cwd": str(tmp_path / "Links Hoard")}},
+        {"id": "dead", "name": "Dead", "purpose": "", "folder": "", "url": "http://127.0.0.1:5999", "health_url": "http://127.0.0.1:5999/healthz",
+         "expect_service": None, "launchable": False, "launch_reason": "no launch hint", "launch": None},
+        {"id": "cassandra", "name": "Cassandra's Hoard", "url": "http://127.0.0.1:5190", "health_url": "http://127.0.0.1:5190/api/health", "expect_service": "cassandra-hoard"},
+    ]
+
+    def hub(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/apps":
+            return httpx.Response(200, json={"service": "hoard-hub", "apps": apps})
+        return httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(hub))
+    config = make_config(tmp_path, hub_registry=True)
+    registry = Registry(config, hub_client=client)
+    assert registry.source == "hub"
+    ids = {s.id for s in registry.list()}
+    assert ids == {"links", "dead"}  # cassandra itself is never listed
+    links = registry.get("links")
+    assert links.kind == "app" and links.expect == {"service": "links-hoard"} and links.launch is not None
+    assert links.launch.executable == "node" and links.log_globs and "logs" in links.log_globs[0]
+    dead = registry.get("dead")
+    assert dead.health_path == "/healthz" and dead.launch is None and dead.launch_reason == "no launch hint"
+    # no hub → manifests
+    down = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599)))
+    write_manifest(tmp_path / "apps", "EchoHoard", "echo", 5188)
+    fallback = Registry(config, hub_client=down)
+    assert fallback.source == "manifests" and {s.id for s in fallback.list()} == {"echo"}
+    assert hub_apps("http://hub.test", client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"service": "other"})))) is None
