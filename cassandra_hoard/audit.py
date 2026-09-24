@@ -295,7 +295,9 @@ def _tracked_files(folder: Path, timeout: float = 10.0) -> Optional[list[str]]:
 def _looks_secret(path: str) -> bool:
     parts = path.replace("\\", "/").split("/")
     name = parts[-1]
-    if any(p in SECRET_FOLDERS for p in parts[:-1]) and not name.endswith((".md", ".json", ".txt", ".example")):
+    # Only a top-level data/ folder is the app's runtime data (a package's own
+    # data/ subfolder holds fixtures and code, not secrets).
+    if len(parts) > 1 and parts[0] in SECRET_FOLDERS and not name.endswith((".md", ".json", ".txt", ".example", ".py", ".tsv", ".csv")):
         return True
     return any(fnmatch.fnmatchcase(name.lower(), pat) for pat in SECRET_PATTERNS)
 
