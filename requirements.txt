@@ -1,0 +1,10 @@
+# Pinned to the versions verified in the build environment (Python 3.11; 3.11+ required, tested layout for 3.13).
+# Every package ships wheels for Windows / Python 3.13. nvidia-smi (from the NVIDIA driver) is optional.
+fastapi==0.141.1
+uvicorn==0.53.0
+pydantic==2.13.5
+starlette==1.6.0
+httpx==0.28.1
+mcp==1.30.0
+psutil==7.1.0
+pytest==9.1.1

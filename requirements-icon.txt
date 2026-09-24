@@ -1,0 +1,4 @@
+# Only for scripts/make_icon.py (regenerating the icon); the app does not need these.
+pillow>=11
+numpy>=2
+opencv-python-headless>=4.10
