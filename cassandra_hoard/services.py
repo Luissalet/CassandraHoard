@@ -62,6 +62,7 @@ class Services:
         self.poller = Poller(config, self.db, self.registry, self.logs, self.incidents, self.restarter, clock_fn=clock_fn, **kwargs)
         # The family bus, mirrored for good: what the assistant and the apps did.
         self.bus = BusMirror(self.db, config.hub_url, clock_fn=clock_fn, incidents=self.incidents, emit=self._emit_event,
+                             service_kind=lambda sid: (self.registry.get(sid).kind if self.registry.get(sid) else None),
                              **(bus_kwargs or {}))
 
     def _emit_event(self, type_: str, data: dict[str, Any]) -> None:

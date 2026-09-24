@@ -47,8 +47,12 @@ SECRET_FOLDERS = ("data", "data-demo", ".venv", "venv")
 
 class BusMirror:
     def __init__(self, db: Any, hub_url: str, *, clock_fn: Callable[[], float] = time.time, poll_s: float = POLL_S,
-                 client: Optional[httpx.Client] = None, incidents: Any = None, emit: Optional[Callable[..., Any]] = None):
+                 client: Optional[httpx.Client] = None, incidents: Any = None, emit: Optional[Callable[..., Any]] = None,
+                 service_kind: Optional[Callable[[str], Optional[str]]] = None):
         self.db = db
+        #: ``service id -> app | external | user``: what a hub rule needs to know whether ``start_app``
+        #: can do anything about the incident (only a hub-managed ``app`` can be started by the hub).
+        self._service_kind = service_kind
         self.hub_url = hub_url.rstrip("/")
         self.clock = clock_fn
         self.poll_s = poll_s
@@ -152,6 +156,7 @@ class BusMirror:
             if prev is None and iid not in self._reported_incidents:
                 if r["kind"] != "restart" and (self.clock() - float(r["opened_at"])) < 3600:
                     self._emit("cassandra.incident.opened", {"incident_id": iid, "app": r["service"], "kind": r["kind"],
+                                                            "service_kind": self._kind_of(r["service"]),
                                                             "to_state": r["to_state"], "detail": (r["detail"] or "")[:200],
                                                             "probable_cause": (r["probable_cause"] or "")[:200]})
                     sent += 1
@@ -165,6 +170,14 @@ class BusMirror:
             for k in sorted(self._seen_open)[:-200]:
                 self._seen_open.pop(k, None)
         return sent
+
+    def _kind_of(self, service_id: str) -> str:
+        if self._service_kind is None:
+            return "unknown"
+        try:
+            return str(self._service_kind(service_id) or "unknown")
+        except Exception:  # noqa: BLE001
+            return "unknown"
 
     def tick(self) -> None:
         try:

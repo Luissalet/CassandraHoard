@@ -38,7 +38,8 @@ class FakeHub:
 def make_mirror(harness: Harness, hub: FakeHub, emitted: list | None = None) -> BusMirror:
     client = httpx.Client(transport=httpx.MockTransport(hub.handler))
     return BusMirror(harness.services.db, "http://hub.test", clock_fn=harness.clock, client=client,
-                     incidents=harness.services.incidents, emit=(lambda t, d: emitted.append((t, d))) if emitted is not None else None)
+                     incidents=harness.services.incidents, emit=(lambda t, d: emitted.append((t, d))) if emitted is not None else None,
+                     service_kind=lambda sid: (harness.services.registry.get(sid).kind if harness.services.registry.get(sid) else None))
 
 
 def test_mirror_stores_and_resumes(tmp_path):
@@ -95,6 +96,7 @@ def test_incidents_are_reported_to_the_bus(tmp_path):
         m.tick()
         opened = [e for e in emitted if e[0] == "cassandra.incident.opened"]
         assert len(opened) == 1 and opened[0][1]["app"] == "argus" and opened[0][1]["to_state"] == "down"
+        assert opened[0][1]["service_kind"] == "app"  # a hub rule may start it again; an external service it could not
         m.tick()
         assert len([e for e in emitted if e[0] == "cassandra.incident.opened"]) == 1  # not twice
         h.net.apps[5183].mode = "up"
