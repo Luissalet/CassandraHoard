@@ -61,8 +61,16 @@ class BusMirror:
         self.last_sync: Optional[float] = None
         self.last_error: Optional[str] = None
         self.synced = 0
+        # Incidents that exist when the mirror starts were reported by the
+        # previous run (or predate it): only their *closing* is news now.
         self._reported_incidents: set[int] = set()
         self._seen_open: dict[int, bool] = {}
+        try:
+            for r in self.db.query("SELECT id, closed_at FROM incidents ORDER BY id DESC LIMIT 500"):
+                self._reported_incidents.add(int(r["id"]))
+                self._seen_open[int(r["id"])] = r["closed_at"] is None
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------- storage ----------
     def _max_hub_id(self) -> int:

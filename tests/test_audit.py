@@ -102,6 +102,17 @@ def test_incidents_are_reported_to_the_bus(tmp_path):
         m.tick()
         closed = [e for e in emitted if e[0] == "cassandra.incident.closed"]
         assert len(closed) == 1 and closed[0][1]["app"] == "argus" and closed[0][1]["duration_s"] >= 20
+        # a restarted mirror does not re-report what it already knew
+        h.net.apps[5183].mode = "down"
+        h.tick(); h.tick()
+        again: list = []
+        m2 = make_mirror(h, hub, again)
+        m2.tick()
+        assert again == []
+        h.net.apps[5183].mode = "up"
+        h.tick(); h.tick()
+        m2.tick()
+        assert [e[0] for e in again] == ["cassandra.incident.closed"]
     finally:
         h.close()
 
