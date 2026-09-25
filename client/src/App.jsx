@@ -119,7 +119,6 @@ export default function App() {
             <img src="/icon-192.png" alt="" width="34" height="34" className="rounded-lg" />
             <div className="leading-tight">
               <div className="text-[15px] font-semibold">Cassandra's Hoard</div>
-              <div className="help text-[11px]">{t("tagline")}</div>
             </div>
           </div>
           <nav aria-label="Sections" className="flex gap-1 overflow-x-auto px-3 pb-2 md:flex-col">
