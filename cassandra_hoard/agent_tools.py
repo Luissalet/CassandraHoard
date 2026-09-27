@@ -16,7 +16,7 @@ from .times import clock, duration, iso, window
 
 AGENT_INSTRUCTIONS = """Cassandra's Hoard watches every local AI service on this PC (the Faustus workspace and its test instances, llama-server, Ollama, ComfyUI, the Hoard Hub launcher and every Hoard app) and remembers what went up and down, when, what else changed at that moment, what the logs said and what the GPUs were doing.
 Use it to answer: "¿está X caído?" / "is X down?" → svc_status; "¿qué pasó a las 04:00?" / "what happened at 4 am?" → svc_incidents with at="04:00" (then svc_why_down or logs_search around that time); "¿por qué se paró Y?" / "why did Y stop?" → svc_why_down; "¿qué GPU está libre?" / "which GPU is free?" → gpu_timeline (the `now` block has free memory per GPU); the full up/down timeline of one service → svc_history.
-Always quote the timestamps you got (local time) and the probable cause as Cassandra states it; say "probable", it is a heuristic. A service marked never_seen was never running while Cassandra watched: that is not an incident.
+Always quote the timestamps you got (local time) and the probable cause as Cassandra states it; say "probable", it is a heuristic. If Cassandra says no clear cause, keep the cause unknown. An empty bus result only means no events were stored: inspect bus_observation before claiming an agent did nothing. A foreground window from Funes shows activity, not an edit, restart or cause. Process start time is not proven service uptime. A service marked never_seen was never running while Cassandra watched: that is not an incident.
 Times accept ISO (2026-09-24T04:00), a clock time (04:00 = the last 04:00), or an age (2h, 30m, 1d).
 svc_restart and svc_watch change things: never restart a service or edit the watch list unless the user explicitly asks for it."""
 
@@ -187,12 +187,28 @@ def run_why(services: Services, args: WhyArgs) -> dict:
         return {"service": service.id, "name": service.name, "state": state["state"], "incident": None, "explanation": [text]}
     ctx = item["context"]
     bus_around = [_brief_event(e) for e in services.bus.around(item["opened_at"], 3.0, 20)]
+    bus_status = services.bus.status()
+    bus_observation = {
+        "running": bus_status["running"],
+        "last_sync": iso(bus_status["last_sync"]) if bus_status["last_sync"] else None,
+        "error": bus_status["last_error"],
+        "note": ("No stored events around the incident; this does not prove that no agent acted."
+                 if not bus_around else None),
+    }
+    cause_unknown = "no clear cause" in str(item.get("probable_cause") or "").casefold()
     return {
         "service": service.id, "name": service.name, "state_now": state["state"],
         "incident": _brief_incident(services, item, now),
         "explanation": explain(item, service.name, service.port, now),
         "bus_events_around": bus_around,
+        "bus_observation": bus_observation,
         "causes": [c["text"] for c in ctx.get("causes", [])],
+        "evidence_assessment": {
+            "cause_status": "unknown" if cause_unknown else "heuristic",
+            "note": ("No recorded cause. An empty log does not establish a clean exit; "
+                     "foreground desktop activity does not establish an edit or manual stop. "
+                     "Process start time does not establish service uptime.") if cause_unknown else None,
+        },
         "process": ctx.get("process"),
         "log_tail": [f"{clock(line['ts'])} {line['line'][:300]}" for line in (ctx.get("log_tail") or [])[-12:]],
         "context_final": item["context_final"],

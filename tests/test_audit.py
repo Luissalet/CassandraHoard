@@ -132,6 +132,7 @@ def test_tools_and_why_down_include_bus_events(tmp_path):
         h.services.bus.sync_once()
         why = call_tool(h.services, "svc_why_down", {"service": "argus"})
         assert why["bus_events_around"] and why["bus_events_around"][0]["tool"] == "screen_timeline"
+        assert why["bus_observation"]["note"] is None
         found = call_tool(h.services, "audit_search", {"query": "screen", "since": "1h"})
         assert found["count"] == 1 and found["events"][0]["source"] == "argus" and found["bus"]["stored"] == 1
         assert call_tool(h.services, "audit_search", {"failed": True, "since": "1h"})["count"] == 0
@@ -139,6 +140,23 @@ def test_tools_and_why_down_include_bus_events(tmp_path):
         assert stats["total"] == 1 and stats["agent_calls"][0]["tool"] == "screen_timeline"
         empty = call_tool(h.services, "audit_search", {"query": "nothing-like-this", "since": "1h"})
         assert empty["note"].startswith("No event")
+    finally:
+        h.close()
+
+
+def test_why_down_does_not_treat_empty_bus_as_no_agent_activity(tmp_path):
+    h = Harness(tmp_path, {"argus": 5183})
+    try:
+        from cassandra_hoard.agent_tools import call_tool
+        h.tick(); h.tick()
+        h.net.apps[5183].mode = "down"
+        h.tick(); h.tick()
+        why = call_tool(h.services, "svc_why_down", {"service": "argus"})
+        assert why["bus_events_around"] == []
+        assert "does not prove" in why["bus_observation"]["note"]
+        assert why["bus_observation"]["last_sync"] is None
+        assert why["evidence_assessment"]["cause_status"] == "unknown"
+        assert "empty log" in why["evidence_assessment"]["note"]
     finally:
         h.close()
 
