@@ -71,6 +71,10 @@ class Config:
     hub_registry: bool = True  # take the app list from the hub when it answers (scan manifests otherwise)
     allowed_hosts: tuple[str, ...] = ()
     data_dir_configured: bool = False
+    boop_enabled: bool = False
+    boop_url: str = ""
+    boop_api_key: str = field(default="", repr=False)
+    public_url: str = ""  # user-configured URL reachable from the notification device
 
     @property
     def db_path(self) -> Path:
@@ -121,4 +125,8 @@ class Config:
             hub_registry=_env("CASSANDRA_HUB_REGISTRY", "1") != "0",
             allowed_hosts=parse_allowed_hosts(_env("CASSANDRA_ALLOWED_HOSTS")),
             data_dir_configured=bool(raw_dir),
+            boop_enabled=_env("CASSANDRA_BOOP_ENABLED") == "1",
+            boop_url=_env("CASSANDRA_BOOP_URL"),
+            boop_api_key=_env("CASSANDRA_BOOP_API_KEY"),
+            public_url=_env("CASSANDRA_PUBLIC_URL"),
         )

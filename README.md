@@ -64,6 +64,8 @@ Open http://127.0.0.1:5190. Put the repository next to the other Hoard apps (the
 
 ## Configuration (environment)
 
+Optional Boop incident notifications are disabled by default. See [configuration, tests and delivery limits](docs/adaptations/BOOP_TRANSPORT_2026-09-29.md) before enabling them.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `CASSANDRA_PORT` / `PORT` | `5190` | Port (the next free one unless `PORT_STRICT=1`). |

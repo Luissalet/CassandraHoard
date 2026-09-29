@@ -64,6 +64,8 @@ Abre http://127.0.0.1:5190. Pon el repositorio junto a las demás apps Hoard (su
 
 ## Configuración (entorno)
 
+Los avisos opcionales de incidentes mediante Boop están desactivados por defecto. Consulta [configuración, pruebas y límites de entrega](docs/adaptations/BOOP_TRANSPORT_2026-09-29.md) antes de activarlos.
+
 | Variable | Por defecto | Significado |
 |---|---|---|
 | `CASSANDRA_PORT` / `PORT` | `5190` | Puerto (el siguiente libre salvo `PORT_STRICT=1`). |

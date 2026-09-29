@@ -14,6 +14,7 @@ from .db import Database
 from .gpu import GpuReader
 from .incidents import Incidents
 from .logs import LogStore
+from .notifications import BoopNotifier
 from .poller import Poller
 from .registry import Registry
 from .restart import Restarter
@@ -54,6 +55,7 @@ class Services:
         self.db = Database(config.db_path)
         self.registry = Registry(config, **(registry_kwargs or {}))
         self.logs = LogStore(self.db, config, self.registry.list, clock_fn)
+        self.notifications = BoopNotifier(config)
         self.incidents = Incidents(self.db, self.logs, self.name_of, clock_fn)
         self.restarter = Restarter(self.db, config, self.registry, self.incidents, clock_fn, **(restarter_kwargs or {}))
         kwargs = dict(poller_kwargs or {})
@@ -66,6 +68,7 @@ class Services:
                              **(bus_kwargs or {}))
 
     def _emit_event(self, type_: str, data: dict[str, Any]) -> None:
+        self.notifications.send(type_, data)
         try:
             from .hoard_link import family
             family.emit(type_, data)
@@ -134,6 +137,7 @@ class Services:
                     "error": getattr(gpu_reader, "error", None) if self.config.gpu else "disabled (CASSANDRA_GPU=0)"},
             "logs": self.logs.counts(),
             "bus": self.bus.status(),
+            "notifications": self.notifications.status(),
             "auto_restart": self.config.auto_restart,
             "registry_error": self.registry.load_error,
             "registry_source": self.registry.source,
