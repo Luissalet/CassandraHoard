@@ -75,3 +75,8 @@ def test_registered_as_a_read_only_tool(tmp_path, monkeypatch):
     monkeypatch.setenv("CASSANDRA_FAUSTUS_TOKEN", "t")
     out = call_tool(services, "faustus_attention", {"wait_min": 30})
     assert out["ok"] is True and [i["session_id"] for i in out["long_waits"]] == ["s1"]
+
+def test_unknown_wait_is_not_zero():
+    out = fa.summarize([{"session_id": "q", "kind": "question"}], NOW)
+    assert out["waiting_on_you"] == 1 and out["oldest_wait_min"] is None
+    assert out["items"][0]["waited_min"] is None and out["long_waits"] == []

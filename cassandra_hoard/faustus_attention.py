@@ -103,7 +103,9 @@ def summarize(runs: Any, now: float, *, wait_min: float = 10.0) -> dict[str, Any
             long_waits.append(item)
     waiting = sum(counts.get(k, 0) for k in WAITING_ON_PERSON)
     long_waits.sort(key=lambda i: -(i["waited_min"] or 0))
-    oldest = max((i["waited_min"] or 0 for i in items if i["kind"] in WAITING_ON_PERSON), default=None)
+    # Unknown ages stay unknown: a question with no timestamp is not "0 minutes".
+    oldest = max((i["waited_min"] for i in items
+                  if i["kind"] in WAITING_ON_PERSON and i["waited_min"] is not None), default=None)
     return {
         "waiting_on_you": waiting,
         "stalled": counts.get("disconnected", 0),
