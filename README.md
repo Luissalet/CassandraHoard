@@ -84,6 +84,8 @@ Optional Boop incident notifications are disabled by default. See [configuration
 | `CASSANDRA_AGENT_COMMANDS` | `0` | `1` = the assistant may set restart commands through `svc_watch`. |
 | `CASSANDRA_HUB_URL` | `http://127.0.0.1:8810` | The launcher used to start discovered apps. |
 | `CASSANDRA_FAUSTUS_PYTHON` | this interpreter | Fills `{FAUSTUS_PYTHON}` in launch hints. |
+| `CASSANDRA_FAUSTUS_URL` | `http://127.0.0.1:7000` | The Faustus instance `faustus_attention` reads (loopback only). |
+| `CASSANDRA_FAUSTUS_TOKEN` | `data/faustus-token` | A Faustus API token with the `attention:read` scope (Settings → API tokens → Attention). Read-only. |
 | `CASSANDRA_GPU` | `1` | `0` = do not run `nvidia-smi`. |
 | `CASSANDRA_PORT_CHECK` | `1` | `0` = skip the listening-port shortcut (HTTP only). |
 | `CASSANDRA_AUTOSTART` | `1` | `0` = do not start the poller with the app. |
@@ -121,6 +123,7 @@ Optional Boop incident notifications are disabled by default. See [configuration
 | `audit_search` | What did the assistant do? The family bus mirrored from the hub: every agent tool call (app, tool, ok, ms, caller), app milestones, hub actions — by words, type, app, tool, failures, time. | no |
 | `audit_stats` | Agent calls per app and tool, failures, slowest, busiest callers, over a window. | no |
 | `secrets_audit` | Leaked secrets in app folders: token present, `data/` git-ignored, secret-looking files tracked by git, `.env` files. | no |
+| `faustus_attention` | Is Faustus waiting for me? Approvals and questions waiting on you, runs that stopped sending events, how long each has waited and the long waits (≥ `wait_min`). Read from Faustus's own attention list with a read-only token; says why when it cannot (no token, refused, Faustus down). | no |
 | `svc_restart` | Restart or start a service (only when the user asks). | yes |
 | `svc_watch` | Add or edit a watched service, its logs and restart policy (only when the user asks). | yes |
 

@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, Field
 
-from . import views
+from . import faustus_attention, views
 from .audit import secrets_audit
 from .incidents import explain
 from .poller import OK_STATES
@@ -18,6 +18,7 @@ AGENT_INSTRUCTIONS = """Cassandra's Hoard watches every local AI service on this
 Use it to answer: "¿está X caído?" / "is X down?" → svc_status; "¿qué pasó a las 04:00?" / "what happened at 4 am?" → svc_incidents with at="04:00" (then svc_why_down or logs_search around that time); "¿por qué se paró Y?" / "why did Y stop?" → svc_why_down; "¿qué GPU está libre?" / "which GPU is free?" → gpu_timeline (the `now` block has free memory per GPU); the full up/down timeline of one service → svc_history.
 Always quote the timestamps you got (local time) and the probable cause as Cassandra states it; say "probable", it is a heuristic. If Cassandra says no clear cause, keep the cause unknown. An empty bus result only means no events were stored: inspect bus_observation before claiming an agent did nothing. A foreground window from Funes shows activity, not an edit, restart or cause. Process start time is not proven service uptime. A service marked never_seen was never running while Cassandra watched: that is not an incident.
 Times accept ISO (2026-09-24T04:00), a clock time (04:00 = the last 04:00), or an age (2h, 30m, 1d).
+"¿me está esperando Faustus?" / "is Faustus waiting for me?" → faustus_attention (approvals and questions waiting on the person, stalled runs, how long each has waited).
 svc_restart and svc_watch change things: never restart a service or edit the watch list unless the user explicitly asks for it."""
 
 
@@ -99,6 +100,10 @@ class WatchArgs(BaseModel):
     expect: Optional[dict[str, Any]] = Field(None, description="JSON key/value the answer must contain; value '*' = key present.")
     log_paths: Optional[list[str]] = Field(None, max_length=50, description="Log files or globs to tail for this service.")
     restart: Optional[RestartPolicyArgs] = None
+
+
+class FaustusAttentionArgs(BaseModel):
+    wait_min: float = Field(10, ge=0, le=1440, description="Waits at least this long (minutes) are listed as long waits.")
 
 
 @dataclass(frozen=True)
@@ -334,6 +339,10 @@ def run_watch(services: Services, args: WatchArgs) -> dict:
             "note": "Saved in data/services.json; the next check includes it."}
 
 
+def run_faustus_attention(services: Services, args: FaustusAttentionArgs) -> dict[str, Any]:
+    return faustus_attention.report(services.config.data_dir, wait_min=args.wait_min, clock=services.clock)
+
+
 def _ann(read_only: bool, destructive: bool = False, idempotent: bool | None = None) -> dict[str, bool]:
     return {"readOnlyHint": read_only, "destructiveHint": destructive, "idempotentHint": read_only if idempotent is None else idempotent, "openWorldHint": False}
 
@@ -348,6 +357,7 @@ TOOLS: list[Tool] = [
     Tool("audit_search", "What the assistant and the apps did: agent calls and app events by time / Qué hizo el asistente, auditoría\nThe family bus mirrored from the Hoard Hub: one agent.call per tool run (app, tool, ok, ms, who asked), app milestones (scribe.transcript.done, links.watch.new), hub actions (backups, rules, starts). Filter by words, type glob, app, tool, failures, and time (at='03:12').\nSinónimos: auditoría, qué hizo, quién llamó, historial de acciones, eventos, llamadas del agente, qué pasó justo antes.", AuditSearchArgs, _ann(True), run_audit_search),
     Tool("audit_stats", "Counts of agent calls per app and tool, failures, slowest, busiest callers / Estadísticas de uso del agente\nOver a window (default 7 days): events by type and source, agent.call per app/tool with failed count and avg/max ms, callers, and the last failures.\nSinónimos: estadísticas, cuántas veces, herramienta más usada, fallos, uso del agente, resumen de actividad.", AuditStatsArgs, _ann(True), run_audit_stats),
     Tool("secrets_audit", "Leaked secrets in app folders: tokens, data/ ignored, tracked .env or db / Auditoría de secretos\nPer app: token file present (and its permissions), data/ in .gitignore, secret-looking files tracked by git (mcp-token, .env, *.key, databases), .env files. Read-only.\nSinónimos: secretos, tokens, fugas, .env, gitignore, seguridad, qué está en git, credenciales.", SecretsArgs, _ann(True), run_secrets),
+    Tool("faustus_attention", "Is Faustus waiting for me? Approvals, questions, stalled runs / ¿Me espera Faustus? Aprobaciones pendientes\nRead from Faustus's own attention list with a read-only token: what each chat is waiting for, for how long, the long waits (≥ wait_min) and runs that stopped sending events. Says why when it cannot read it (no token, refused, Faustus down).\nSinónimos: aprobación pendiente, me espera, atascado, turno parado, pregunta abierta, Faustus esperando, atención.", FaustusAttentionArgs, _ann(True), run_faustus_attention),
     Tool("svc_restart", "Restart or start one service now (only when the user asks) / Reiniciar o arrancar un servicio ahora\nUses its restart command, the Hoard Hub launcher or the app's launch hint; recorded in the open incident. Refuses when another program holds the port.\nSinónimos: reiniciar, arrancar, levantar, relanzar, volver a encender, restart, start.", RestartArgs, _ann(False, False, False), run_restart),
     Tool("svc_watch", "Add or edit a watched service: URL, health path, logs, restart policy / Añadir o editar un servicio vigilado\nSaved in data/services.json. An existing id (also a discovered app or built-in) is edited; restart.enabled turns on automatic restarts (opt-in, max_per_hour). Only when the user asks.\nSinónimos: vigilar, monitorizar, añadir servicio, nuevo servicio, política de reinicio, logs de un servicio.", WatchArgs, _ann(False, False, True), run_watch),
 ]

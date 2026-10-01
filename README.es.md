@@ -84,6 +84,8 @@ Los avisos opcionales de incidentes mediante Boop están desactivados por defect
 | `CASSANDRA_AGENT_COMMANDS` | `0` | `1` = el asistente puede fijar comandos de reinicio con `svc_watch`. |
 | `CASSANDRA_HUB_URL` | `http://127.0.0.1:8810` | El lanzador usado para arrancar apps descubiertas. |
 | `CASSANDRA_FAUSTUS_PYTHON` | este intérprete | Rellena `{FAUSTUS_PYTHON}` en los launch hints. |
+| `CASSANDRA_FAUSTUS_URL` | `http://127.0.0.1:7000` | La instancia de Faustus que lee `faustus_attention` (sólo loopback). |
+| `CASSANDRA_FAUSTUS_TOKEN` | `data/faustus-token` | Un token de API de Faustus con el ámbito `attention:read` (Ajustes → Tokens de API → Atención). Sólo lectura. |
 | `CASSANDRA_GPU` | `1` | `0` = no ejecutar `nvidia-smi`. |
 | `CASSANDRA_PORT_CHECK` | `1` | `0` = sin atajo de puertos en escucha (solo HTTP). |
 | `CASSANDRA_AUTOSTART` | `1` | `0` = no arrancar el sondeo con la app. |
@@ -121,6 +123,7 @@ Ejemplo de `data/services.json`:
 | `audit_search` | ¿Qué hizo el asistente? El bus de la familia espejado desde el hub: cada llamada a una herramienta (app, tool, ok, ms, quién), hitos de las apps, acciones del hub — por palabras, tipo, app, herramienta, fallos, hora. | no |
 | `audit_stats` | Llamadas del agente por app y herramienta, fallos, las más lentas, quién llama más, en un intervalo. | no |
 | `secrets_audit` | Secretos expuestos en las carpetas de las apps: token presente, `data/` ignorado por git, ficheros con pinta de secreto rastreados por git, ficheros `.env`. | no |
+| `faustus_attention` | ¿Me espera Faustus? Aprobaciones y preguntas que te esperan, ejecuciones que dejaron de mandar eventos, cuánto lleva cada una y las esperas largas (≥ `wait_min`). Lo lee de la lista de atención del propio Faustus con un token de sólo lectura; dice por qué cuando no puede (sin token, rechazado, Faustus caído). | no |
 | `svc_restart` | Reiniciar o arrancar un servicio (solo si el usuario lo pide). | sí |
 | `svc_watch` | Añadir o editar un servicio vigilado, sus logs y su política (solo si el usuario lo pide). | sí |
 

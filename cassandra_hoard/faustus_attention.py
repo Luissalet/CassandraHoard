@@ -1,0 +1,136 @@
+"""What is waiting for the person in Faustus: approvals, questions, stalled runs.
+
+Cassandra watches whether Faustus is *up*. That says nothing about a turn
+that has been sitting on an approval card for forty minutes while the person
+is somewhere else, or a run that stopped sending events. Faustus already
+answers that question for its own Activity screen (``GET /api/attention``);
+this module reads it with a read-only token (scope ``attention:read``) and
+turns it into a short report the assistant and the panel can quote.
+
+Token: ``CASSANDRA_FAUSTUS_TOKEN`` or the file ``<data>/faustus-token``
+(mint one in Faustus, Settings, API tokens, scope "Attention"). Address:
+``CASSANDRA_FAUSTUS_URL`` (default ``http://127.0.0.1:7000``). Nothing is
+written to Faustus; nothing is sent anywhere but that loopback address.
+"""
+
+from __future__ import annotations
+
+import os
+import time
+from pathlib import Path
+from typing import Any, Callable, Optional
+from urllib.parse import urlsplit
+
+import httpx
+
+DEFAULT_URL = "http://127.0.0.1:7000"
+TIMEOUT_S = 3.0
+LOOPBACK = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+KIND_LABEL = {
+    "approval": "waiting for an approval",
+    "question": "waiting for an answer",
+    "disconnected": "no events for a while (stalled?)",
+    "queued_model": "queued for the model",
+    "dependency": "waiting for a delegated worker",
+    "finished_unreviewed": "finished, not reviewed",
+}
+WAITING_ON_PERSON = ("approval", "question")
+
+
+def faustus_url() -> str:
+    return (os.environ.get("CASSANDRA_FAUSTUS_URL") or DEFAULT_URL).strip().rstrip("/")
+
+
+def read_token(data_dir: Path) -> str:
+    env = (os.environ.get("CASSANDRA_FAUSTUS_TOKEN") or "").strip()
+    if env:
+        return env
+    try:
+        return (Path(data_dir) / "faustus-token").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _is_loopback(url: str) -> bool:
+    return (urlsplit(url).hostname or "").lower() in LOOPBACK
+
+
+def fetch(url: str, token: str, *, transport: Optional[httpx.BaseTransport] = None,
+          limit: int = 50) -> tuple[Optional[int], Any]:
+    """``(status, json)``; status None = could not connect. Never raises."""
+    if not _is_loopback(url):
+        return -1, {"error": "Faustus URL must be a loopback address"}
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        with httpx.Client(timeout=TIMEOUT_S, transport=transport) as client:
+            resp = client.get(f"{url}/api/attention", params={"limit": limit}, headers=headers)
+    except Exception:  # noqa: BLE001 - absent Faustus is an answer, not an error
+        return None, None
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    return resp.status_code, data
+
+
+def summarize(runs: Any, now: float, *, wait_min: float = 10.0) -> dict[str, Any]:
+    """Counts by kind, the items waiting on the person, and the long waits."""
+    rows = [r for r in (runs or []) if isinstance(r, dict)]
+    counts: dict[str, int] = {}
+    items: list[dict[str, Any]] = []
+    long_waits: list[dict[str, Any]] = []
+    for r in rows:
+        kind = str(r.get("kind") or "")
+        counts[kind] = counts.get(kind, 0) + 1
+        since = r.get("since")
+        try:
+            waited_min = max(0.0, (now - float(since)) / 60.0) if since else None
+        except (TypeError, ValueError):
+            waited_min = None
+        item = {
+            "session_id": r.get("session_id"),
+            "label": r.get("label") or "",
+            "kind": kind,
+            "what": KIND_LABEL.get(kind, kind),
+            "next_action": r.get("next_action"),
+            "waited_min": round(waited_min, 1) if waited_min is not None else None,
+        }
+        if r.get("detail"):
+            item["detail"] = r.get("detail")
+        items.append(item)
+        if kind in WAITING_ON_PERSON + ("disconnected",) and waited_min is not None and waited_min >= wait_min:
+            long_waits.append(item)
+    waiting = sum(counts.get(k, 0) for k in WAITING_ON_PERSON)
+    long_waits.sort(key=lambda i: -(i["waited_min"] or 0))
+    oldest = max((i["waited_min"] or 0 for i in items if i["kind"] in WAITING_ON_PERSON), default=None)
+    return {
+        "waiting_on_you": waiting,
+        "stalled": counts.get("disconnected", 0),
+        "counts": counts,
+        "oldest_wait_min": oldest,
+        "long_waits": long_waits,
+        "wait_min": wait_min,
+        "items": items,
+    }
+
+
+def report(data_dir: Path, *, wait_min: float = 10.0, url: Optional[str] = None,
+           token: Optional[str] = None, transport: Optional[httpx.BaseTransport] = None,
+           clock: Callable[[], float] = time.time) -> dict[str, Any]:
+    url = (url or faustus_url()).rstrip("/")
+    token = read_token(data_dir) if token is None else token
+    if not token:
+        return {"ok": False, "url": url, "reason": "no_token",
+                "note": "Set CASSANDRA_FAUSTUS_TOKEN or write a Faustus API token with scope attention:read to data/faustus-token."}
+    status, data = fetch(url, token, transport=transport)
+    if status is None:
+        return {"ok": False, "url": url, "reason": "unreachable", "note": "Faustus did not answer (is it running?)."}
+    if status in (401, 403):
+        return {"ok": False, "url": url, "reason": "forbidden", "status": status,
+                "note": "Faustus refused the token: it needs the attention:read (or sessions) scope."}
+    if status != 200 or not isinstance(data, dict):
+        return {"ok": False, "url": url, "reason": "bad_answer", "status": status}
+    out = summarize(data.get("runs"), clock(), wait_min=wait_min)
+    out.update({"ok": True, "url": url, "unread": data.get("unread_count")})
+    return out
