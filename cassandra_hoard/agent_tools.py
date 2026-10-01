@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +12,7 @@ from .audit import secrets_audit
 from .incidents import explain
 from .poller import OK_STATES
 from .services import Services
+from .sites import SITE_PREFIX
 from .times import clock, duration, iso, window
 
 AGENT_INSTRUCTIONS = """Cassandra's Hoard watches every local AI service on this PC (the Faustus workspace and its test instances, llama-server, Ollama, ComfyUI, the Hoard Hub launcher and every Hoard app) and remembers what went up and down, when, what else changed at that moment, what the logs said and what the GPUs were doing.
@@ -19,7 +20,8 @@ Use it to answer: "¿está X caído?" / "is X down?" → svc_status; "¿qué pas
 Always quote the timestamps you got (local time) and the probable cause as Cassandra states it; say "probable", it is a heuristic. If Cassandra says no clear cause, keep the cause unknown. An empty bus result only means no events were stored: inspect bus_observation before claiming an agent did nothing. A foreground window from Funes shows activity, not an edit, restart or cause. Process start time is not proven service uptime. A service marked never_seen was never running while Cassandra watched: that is not an incident.
 Times accept ISO (2026-09-24T04:00), a clock time (04:00 = the last 04:00), or an age (2h, 30m, 1d).
 "¿me está esperando Faustus?" / "is Faustus waiting for me?" → faustus_attention (approvals and questions waiting on the person, stalled runs, how long each has waited).
-svc_restart and svc_watch change things: never restart a service or edit the watch list unless the user explicitly asks for it."""
+Public websites (the sites other people use, watched from outside; the list is data/sites.json): "¿está mi web caída?" / "is my website up?", "¿cuándo caduca el certificado o el dominio?" / "when does the certificate or the domain expire?" → sites_status (state, latency, certificate days left, domain days left from RDAP, last change; a domain whose RDAP answer is unknown is unknown, not fine); "¿ha estado caída esta semana?" / "was it down this week?" → site_history. A site is down only after two failed checks in a row; its incidents (kind site) also appear in svc_incidents as service site:<id>. Certificate and domain dates are checked, not guessed: quote them with their days left.
+svc_restart, svc_watch and sites_watch change things: never restart a service or edit the watch list (services or sites) unless the user explicitly asks for it."""
 
 
 class Empty(BaseModel):
@@ -100,6 +102,26 @@ class WatchArgs(BaseModel):
     expect: Optional[dict[str, Any]] = Field(None, description="JSON key/value the answer must contain; value '*' = key present.")
     log_paths: Optional[list[str]] = Field(None, max_length=50, description="Log files or globs to tail for this service.")
     restart: Optional[RestartPolicyArgs] = None
+
+
+class SitesStatusArgs(BaseModel):
+    site: Optional[str] = Field(None, max_length=200, description="Site id, name or host (e.g. 'example.com'); omit for every site.")
+
+
+class SiteHistoryArgs(WindowArgs):
+    site: str = Field(..., min_length=1, max_length=200, description="Site id, name or host.")
+
+
+class SitesWatchArgs(BaseModel):
+    action: Literal["add", "edit", "remove"] = Field(..., description="add a site, edit one (only the fields you pass change) or remove it from the list (its history stays).")
+    id: Optional[str] = Field(None, max_length=64, description="Lowercase id (letters, digits, . _ -). Required for edit and remove; add derives it from the url.")
+    url: Optional[str] = Field(None, max_length=500, description="Home page, e.g. https://example.com/ (required for add).")
+    name: Optional[str] = Field(None, max_length=120)
+    expect_status: Optional[list[str]] = Field(None, max_length=20, description="Accepted HTTP statuses: '2xx', '301', '200-299'. Default ['2xx','3xx'].")
+    keyword: Optional[str] = Field(None, max_length=200, description="Text the home page must contain (case-insensitive); empty string removes it.")
+    interval_min: Optional[float] = Field(None, ge=1, le=1440, description="Minutes between checks (default 5, minimum 1).")
+    enabled: Optional[bool] = Field(None, description="false pauses the checks.")
+    domain: Optional[str] = Field(None, max_length=253, description="Registrable domain for the RDAP expiry lookup when the automatic guess is wrong (e.g. example.co.uk).")
 
 
 class FaustusAttentionArgs(BaseModel):
@@ -343,6 +365,66 @@ def run_faustus_attention(services: Services, args: FaustusAttentionArgs) -> dic
     return faustus_attention.report(services.config.data_dir, wait_min=args.wait_min, clock=services.clock)
 
 
+def _resolve_site(services: Services, text: str) -> dict[str, Any]:
+    site = services.sites.store.find(text)
+    if site is None:
+        known = ", ".join(s["id"] for s in services.sites.store.list()[:40]) or "none (add one with sites_watch)"
+        raise LookupError(f"Unknown site '{text}'. Known site ids: {known}")
+    return site
+
+
+def run_sites_status(services: Services, args: SitesStatusArgs) -> dict:
+    now = services.clock()
+    items = [services.sites.status_one(_resolve_site(services, args.site), now)] if args.site else services.sites.status_all(now)
+    keys = ("id", "name", "url", "state", "for", "since_iso", "status", "latency_ms", "redirect", "keyword_ok", "cause", "failing_checks",
+            "last_check", "next_check", "tls", "domain", "dns", "last_change", "open_incident", "warnings", "enabled", "interval_min", "expect_status", "keyword")
+    brief = [{k: item[k] for k in keys if item.get(k) not in (None, "", [])} for item in items]
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item["state"]] = counts.get(item["state"], 0) + 1
+    return {
+        "checked": iso(services.sites.last_tick) if services.sites.last_tick else None,
+        "summary": counts, "down": [i["name"] for i in items if i["state"] == "down"],
+        "expiring": [f"{i['name']}: {w}" for i in items for w in i["warnings"] if "expires" in w],
+        "sites": brief,
+        "note": ("No public site is watched yet: add one with sites_watch (or in data/sites.json)." if not items else
+                 "Domain days come from RDAP (cached up to a day); a domain with status unknown has no readable expiry date." if any(
+                     (i.get("domain") or {}).get("status") in ("unknown", "error") for i in items) else None),
+    }
+
+
+def run_site_history(services: Services, args: SiteHistoryArgs) -> dict:
+    now = services.clock()
+    since, until = window(args.since, args.until, args.at, args.window_min, default_hours=24, now=now)
+    site = _resolve_site(services, args.site)
+    return services.sites.history(site, since, until)
+
+
+def run_sites_watch(services: Services, args: SitesWatchArgs) -> dict:
+    raw = args.model_dump(exclude_none=True)
+    action = raw.pop("action")
+    store = services.sites.store
+    if action == "remove":
+        if not args.id:
+            raise ValueError("remove needs the site id.")
+        site = store.remove(args.id)
+        if site is None:
+            raise LookupError(f"Unknown site '{args.id}'.")
+        services.sites.forget(site)
+        return {"ok": True, "removed": site["id"], "note": "Removed from data/sites.json; its stored history stays."}
+    if action == "edit":
+        if not args.id or store.find(args.id) is None:
+            raise LookupError(f"Unknown site '{args.id}'. Use action 'add' for a new site.")
+    elif not args.url:
+        raise ValueError("add needs the site url.")
+    elif store.find(args.id or args.url) is not None:
+        raise ValueError("That site is already watched; use action 'edit'.")
+    site, created = store.upsert(raw)
+    services.sites.wake()
+    return {"ok": True, "created": created, "site": services.sites.status_one(site),
+            "note": "Saved in data/sites.json; the first check runs within seconds." if created else "Saved in data/sites.json."}
+
+
 def _ann(read_only: bool, destructive: bool = False, idempotent: bool | None = None) -> dict[str, bool]:
     return {"readOnlyHint": read_only, "destructiveHint": destructive, "idempotentHint": read_only if idempotent is None else idempotent, "openWorldHint": False}
 
@@ -358,8 +440,11 @@ TOOLS: list[Tool] = [
     Tool("audit_stats", "Counts of agent calls per app and tool, failures, slowest, busiest callers / Estadísticas de uso del agente\nOver a window (default 7 days): events by type and source, agent.call per app/tool with failed count and avg/max ms, callers, and the last failures.\nSinónimos: estadísticas, cuántas veces, herramienta más usada, fallos, uso del agente, resumen de actividad.", AuditStatsArgs, _ann(True), run_audit_stats),
     Tool("secrets_audit", "Leaked secrets in app folders: tokens, data/ ignored, tracked .env or db / Auditoría de secretos\nPer app: token file present (and its permissions), data/ in .gitignore, secret-looking files tracked by git (mcp-token, .env, *.key, databases), .env files. Read-only.\nSinónimos: secretos, tokens, fugas, .env, gitignore, seguridad, qué está en git, credenciales.", SecretsArgs, _ann(True), run_secrets),
     Tool("faustus_attention", "Is Faustus waiting for me? Approvals, questions, stalled runs / ¿Me espera Faustus? Aprobaciones pendientes\nRead from Faustus's own attention list with a read-only token: what each chat is waiting for, for how long, the long waits (≥ wait_min) and runs that stopped sending events. Says why when it cannot read it (no token, refused, Faustus down).\nSinónimos: aprobación pendiente, me espera, atascado, turno parado, pregunta abierta, Faustus esperando, atención.", FaustusAttentionArgs, _ann(True), run_faustus_attention),
+    Tool("sites_status", "Are my public websites up? Latency, certificate and domain days left / ¿Están mis webs públicas bien?\nEvery watched site (or one): up/down, HTTP status, latency, redirect, certificate days left and issuer, DNS answers, domain registration expiry (RDAP), last change, open incident, warnings.\nSinónimos: web caída, mi página, certificado, caducidad, dominio, TLS, SSL, https, renovación, disponibilidad.", SitesStatusArgs, _ann(True), run_sites_status),
+    Tool("site_history", "Up/down history of one public website: changes, uptime, latency / Historial de una web pública\nState changes (down, up, certificate renewed or expiring, DNS answers changed), uptime percentage, latency avg/p95/max with a series, and its incidents with cause.\nSinónimos: historial de la web, cuándo estuvo caída, disponibilidad, uptime, latencia, certificado renovado.", SiteHistoryArgs, _ann(True), run_site_history),
     Tool("svc_restart", "Restart or start one service now (only when the user asks) / Reiniciar o arrancar un servicio ahora\nUses its restart command, the Hoard Hub launcher or the app's launch hint; recorded in the open incident. Refuses when another program holds the port.\nSinónimos: reiniciar, arrancar, levantar, relanzar, volver a encender, restart, start.", RestartArgs, _ann(False, False, False), run_restart),
     Tool("svc_watch", "Add or edit a watched service: URL, health path, logs, restart policy / Añadir o editar un servicio vigilado\nSaved in data/services.json. An existing id (also a discovered app or built-in) is edited; restart.enabled turns on automatic restarts (opt-in, max_per_hour). Only when the user asks.\nSinónimos: vigilar, monitorizar, añadir servicio, nuevo servicio, política de reinicio, logs de un servicio.", WatchArgs, _ann(False, False, True), run_watch),
+    Tool("sites_watch", "Add, edit or remove a watched public website / Añadir, editar o quitar una web pública vigilada\nSaved in data/sites.json: url, expected status, keyword, check interval, pause. Removing keeps its history. Changes the watch list: only when the user asks.\nSinónimos: vigilar una web, añadir sitio, quitar sitio, monitorizar página, palabra clave, intervalo de comprobación.", SitesWatchArgs, _ann(False, False, False), run_sites_watch),
 ]
 
 TOOLS_BY_NAME = {tool.name: tool for tool in TOOLS}

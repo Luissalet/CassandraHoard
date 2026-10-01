@@ -19,6 +19,7 @@ from .notifications import BoopNotifier
 from .poller import Poller
 from .registry import Registry
 from .restart import Restarter
+from .sites import SITE_PREFIX, SiteStore, SiteWatcher
 from .times import iso
 
 log = logging.getLogger("cassandra")
@@ -45,7 +46,7 @@ def write_url(config: Config) -> None:
 class Services:
     def __init__(self, config: Config, *, clock_fn: Callable[[], float] = time.time, poller_kwargs: Optional[dict[str, Any]] = None,
                  restarter_kwargs: Optional[dict[str, Any]] = None, bus_kwargs: Optional[dict[str, Any]] = None,
-                 registry_kwargs: Optional[dict[str, Any]] = None):
+                 registry_kwargs: Optional[dict[str, Any]] = None, sites_kwargs: Optional[dict[str, Any]] = None):
         self.config = config
         self.clock = clock_fn
         self.started_at = time.time()
@@ -65,13 +66,18 @@ class Services:
         self.poller = Poller(config, self.db, self.registry, self.logs, self.incidents, self.restarter, clock_fn=clock_fn, **kwargs)
         # The family bus, mirrored for good: what the assistant and the apps did.
         self.bus = BusMirror(self.db, config.hub_url, clock_fn=clock_fn, incidents=self.incidents, emit=self._emit_event,
-                             service_kind=lambda sid: (self.registry.get(sid).kind if self.registry.get(sid) else None),
+                             service_kind=lambda sid: ("site" if sid.startswith(SITE_PREFIX)
+                                                       else self.registry.get(sid).kind if self.registry.get(sid) else None),
                              **(bus_kwargs or {}))
         # What Faustus is waiting on the person for (radar #403): announced
         # once per long wait on the family bus and, if configured, Boop.
         self.faustus_watch = FaustusWatcher(config.data_dir, wait_min=config.faustus_wait_min,
                                             interval_s=max(60.0, config.poll_s * 3), emit=self._emit_event,
                                             clock=clock_fn)
+
+        # The public websites (data/sites.json): up/down, certificate and domain expiry.
+        self.sites = SiteWatcher(self.db, SiteStore(config.sites_path), incidents=self.incidents, emit=self._emit_event,
+                                 clock_fn=clock_fn, tick_s=config.sites_tick_s, enabled=config.sites, **(sites_kwargs or {}))
 
     def _emit_event(self, type_: str, data: dict[str, Any]) -> None:
         self.notifications.send(type_, data)
@@ -84,6 +90,8 @@ class Services:
     def name_of(self, service_id: str) -> str:
         if service_id == "system":
             return "System"
+        if service_id.startswith(SITE_PREFIX):
+            return self.sites.name_of(service_id)
         service = self.registry.get(service_id)
         return service.name if service else service_id
 
@@ -94,8 +102,10 @@ class Services:
             if self.config.bus:
                 self.bus.start()
             self.faustus_watch.start()
+            self.sites.start()
 
     def stop(self) -> None:
+        self.sites.stop()
         self.faustus_watch.stop()
         self.bus.stop()
         self.poller.stop()
@@ -147,6 +157,7 @@ class Services:
             "bus": self.bus.status(),
             "notifications": self.notifications.status(),
             "faustus_attention": self.faustus_watch.status(),
+            "sites": self.sites.summary(),
             "auto_restart": self.config.auto_restart,
             "registry_error": self.registry.load_error,
             "registry_source": self.registry.source,

@@ -82,14 +82,14 @@ def test_settings_watch_policy_restart(client):
 def test_agent_catalogue_schema(client):
     catalog = client.get("/api/agent/tools").json()
     names = [t["name"] for t in catalog["tools"]]
-    assert names == ["svc_status", "svc_incidents", "svc_why_down", "logs_search", "gpu_timeline", "svc_history", "audit_search", "audit_stats", "secrets_audit", "faustus_attention", "svc_restart", "svc_watch"]
+    assert names == ["svc_status", "svc_incidents", "svc_why_down", "logs_search", "gpu_timeline", "svc_history", "audit_search", "audit_stats", "secrets_audit", "faustus_attention", "sites_status", "site_history", "svc_restart", "svc_watch", "sites_watch"]
     assert "never restart" in catalog["instructions"] and "04:00" in catalog["instructions"]
     for tool in catalog["tools"]:
         first = tool["description"].split("\n", 1)[0]
         assert len(first) <= 110, (tool["name"], len(first))
         assert " / " in first and re.search(r"[áéíóúñ¿]", first + tool["description"]), tool["name"]  # English / Spanish
         assert "Sinónimos:" in tool["description"] and tool["inputSchema"]["type"] == "object"
-        read_only = tool["name"] not in ("svc_restart", "svc_watch")
+        read_only = tool["name"] not in ("svc_restart", "svc_watch", "sites_watch")
         assert tool["annotations"]["readOnlyHint"] is read_only
     assert client.post("/api/agent/call", json={"name": "svc_status"}).status_code == 401
     assert client.post("/api/agent/call", json={"name": "svc_status"}, headers={"Authorization": "Bearer nope"}).status_code == 401

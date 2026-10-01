@@ -80,6 +80,37 @@ class FakeNet(httpx.AsyncBaseTransport):
         return {port: 1000 + port for port, fake in self.apps.items() if fake.mode != "down"}
 
 
+class FakeSiteNet:
+    """The network side of the public-site checks: DNS, HTTP and TLS answers the test sets by hand."""
+
+    def __init__(self):
+        self.http = {"status": 200, "latency_ms": 120.0, "redirect": None, "final_url": "", "body": "<html>Welcome to the shop</html>", "error": None}
+        self.dns = {"ok": True, "addresses": ["203.0.113.10"], "error": None}
+        self.tls = {"ok": True, "chain_valid": True, "hostname_match": True, "not_after": T0 + 80 * 86400, "not_before": T0 - 10 * 86400,
+                    "days_left": 80, "issuer": "Example CA (E1)", "subject": "example.com", "san": ["example.com"], "fingerprint": "fp-one", "error": None}
+        self.calls = {"http": 0, "tls": 0, "dns": 0}
+        self.urls: list[str] = []
+
+    def http_fn(self, url, *, timeout=15.0, follow=False, transport=None):
+        self.calls["http"] += 1
+        self.urls.append(url)
+        return dict(self.http)
+
+    def tls_fn(self, host, port=443, **kwargs):
+        self.calls["tls"] += 1
+        return dict(self.tls)
+
+    def dns_fn(self, host, port=443, **kwargs):
+        self.calls["dns"] += 1
+        return dict(self.dns)
+
+    def fail(self, kind, detail):
+        self.http = {**self.http, "status": None, "latency_ms": None, "body": None, "error": {"kind": kind, "detail": detail}}
+
+    def respond(self, status=200, body="<html>Welcome to the shop</html>", latency=120.0, redirect=None):
+        self.http = {**self.http, "status": status, "latency_ms": latency, "body": body, "redirect": redirect, "error": None}
+
+
 class FakeGpu:
     def __init__(self):
         self.samples = [GpuSample(0, 2000, 24000, 5.0), GpuSample(1, 1000, 12000, 0.0)]
@@ -122,6 +153,7 @@ class Harness:
         self.net = FakeNet()
         self.clock = FakeClock()
         self.gpu = FakeGpu()
+        self.sitenet = FakeSiteNet()
         self.alive: dict[int, bool] = {}
         self.boot = T0 - 3600
         self.spawned: list[tuple] = []
@@ -147,6 +179,9 @@ class Harness:
             restarter_kwargs=dict(hub_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599))), spawn=spawn),
             # hermetic: the real hub may be running on this machine
             registry_kwargs=dict(hub_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599)))),
+            # hermetic: the public-site checks (and RDAP) never touch the real network
+            sites_kwargs=dict(http_fn=self.sitenet.http_fn, tls_fn=self.sitenet.tls_fn, dns_fn=self.sitenet.dns_fn,
+                              rdap_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599)))),
         )
 
     def proc(self, pid):

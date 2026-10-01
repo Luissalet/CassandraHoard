@@ -2,7 +2,7 @@
 
 Observability for the whole local AI stack on your PC. It watches every local service you run — the Faustus workspace and its test instances, llama-server, Ollama, ComfyUI, the Hoard Hub launcher and every Hoard app — and remembers **what is up, what went down and when, what else changed at that same moment, what the logs said and what the GPUs were doing**. When something stops at 04:00 and nobody knows why, Cassandra has the answer (or the most probable one). An assistant reaches the same data through MCP, so you can simply ask "why did Borges stop last night?".
 
-Everything stays on the machine: one SQLite file, no accounts, no telemetry, no network beyond loopback health checks of your own services.
+Everything stays on the machine: one SQLite file, no accounts, no telemetry, no network beyond loopback health checks of your own services and, only if you list public websites, one request per site every few minutes.
 
 Part of the Hoard family (see `faustus-plugin.json`).
 
@@ -26,7 +26,8 @@ Part of the Hoard family (see `faustus-plugin.json`).
 - **Audit trail** (Hoard Link 0.4): the Hoard Hub keeps a rolling event bus every app posts to — one `agent.call` per tool the assistant ran, app milestones (`scribe.transcript.done`, `links.watch.new`…), hub actions (`hub.backup.done`, `hub.rule.ran`, `hub.app.started`). Cassandra mirrors it for good into `bus_events` (`GET <hub>/api/events?since_id=`, every 10 s, `CASSANDRA_BUS=0` to disable, `CASSANDRA_HUB_URL` for the hub), so `svc_why_down` also shows what the assistant did in the three minutes around an incident, and `audit_search` / `audit_stats` answer "who called what, when, and what failed". Cassandra posts its own `cassandra.incident.opened` / `closed` events to the bus, so a hub rule can react to a service going down.
 - **Secrets audit**: `secrets_audit` walks every app folder Cassandra discovered: the agent token file (present, permissions), whether `data/` is git-ignored, secret-looking files tracked by git (`mcp-token`, `.env`, `*.key`, databases), `.env` files. Read-only, no network.
 - **Restart policies** (opt-in, per service): the policy's own command; or, for a discovered app while the launcher is up, `POST http://127.0.0.1:8810/api/apps/<id>/start` (`/restart` if it still runs); or the app's manifest `launch_hint` (`{X_DIR}`, `{FAUSTUS_PYTHON}` resolved like the launcher does). Never more than `max_per_hour` automatic restarts per service; never over a port held by another program; every attempt is recorded in the incident. A manual restart (UI button or `svc_restart`) is always allowed for a service that has a way to start.
-- **UI** (Spanish or English, automatic, switchable; dark theme): **Panel** (status grid grouped by kind with a 24 h lane per service, machine and GPU summary, check now, restart), **Incidents** (filters by service, window or "around 04:00", open only; each incident expands to the explanation, what else changed, GPUs, process, log tail and actions), **GPU** (plain SVG chart of memory and load, peaks, free memory), **Logs** (search by words, service, level and time), **Services** (automatic-restart switch, max/hour and command per service, add or remove your own services, effective configuration). Installable as a PWA.
+- **Public websites** (`data/sites.json`, never in code): Cassandra watches your public sites from outside. Per site: HTTP (expected status, default `2xx`/`3xx`; an optional keyword that must appear in the first 512 KB of the page, in which case redirects are followed), latency, **TLS certificate** (days left, issuer, hostname and chain validity, re-read hourly), **DNS** (the addresses; a change is recorded as an event, not an incident) and **domain expiry** from RDAP (IANA bootstrap, once a day per registrable domain; a TLD without RDAP shows `unknown`). A site is `down` after 2 consecutive failures (the first failure schedules one confirming check 60 s later) and `up` on the first success; the incident opens and closes like any service's, with a cause in plain words (timeout, DNS failure, TLS error, unexpected status, keyword missing). Warnings, each once: certificate at 21, 7 and 1 days, domain at 30, 7 and 1 days; a renewal is recorded. Bus events `cassandra.site.down`, `.up`, `.cert_expiring` and `.domain_expiring`; with Boop configured, the incident notifications plus the two expiry warnings (no site names in the text). Each check is one GET of the home page with the User-Agent `Cassandra's Hoard site check/<version> (monitor run by the site owner)`, at most once per interval (default 5 min, 1 to 1440); a manual check of a site is spaced at least a minute from the previous one. The list is edited from the Panel card, with `sites_watch`, or by hand (picked up on the next read). `CASSANDRA_SITES=0` turns it all off.
+- **UI** (Spanish or English, automatic, switchable; dark theme): **Panel** (status grid grouped by kind with a 24 h lane per service, machine and GPU summary, the **Public websites** card with its list editor, check now, restart), **Incidents** (filters by service, window or "around 04:00", open only; each incident expands to the explanation, what else changed, GPUs, process, log tail and actions), **GPU** (plain SVG chart of memory and load, peaks, free memory), **Logs** (search by words, service, level and time), **Services** (automatic-restart switch, max/hour and command per service, add or remove your own services, effective configuration). Installable as a PWA.
 
 ## Requirements
 
@@ -91,6 +92,8 @@ Optional Boop incident notifications are disabled by default. See [configuration
 | `CASSANDRA_PORT_CHECK` | `1` | `0` = skip the listening-port shortcut (HTTP only). |
 | `CASSANDRA_AUTOSTART` | `1` | `0` = do not start the poller with the app. |
 | `CASSANDRA_ALLOWED_HOSTS` | — | Extra Host names (exact or `*.suffix`) for access through a tunnel. |
+| `CASSANDRA_SITES` | `1` | `0` = do not watch public websites (no outgoing requests at all). |
+| `CASSANDRA_SITES_TICK_S` | `15` | How often the website watcher looks for sites that are due (each site still honours its own interval). |
 
 `data/services.json` example:
 
@@ -105,9 +108,20 @@ Optional Boop incident notifications are disabled by default. See [configuration
 }
 ```
 
+`data/sites.json` example (the public websites; the `id` comes from the host, `expect_status` defaults to `["2xx","3xx"]`, `interval_min` to 5):
+
+```json
+{
+  "sites": [
+    {"url": "https://example.com/", "name": "Shop", "keyword": "Add to cart", "interval_min": 5},
+    {"url": "https://www.example.org/", "expect_status": ["200", "301-308"], "enabled": false}
+  ]
+}
+```
+
 ## API
 
-`GET /api/health` (`{"service": "cassandra-hoard", ...}`), `/api/status`, `/api/services`, `/api/services/{id}`, `/api/services/{id}/history`, `/api/lanes?hours=24`, `/api/incidents` (`since`, `until`, `at`, `window_min`, `service`, `open_only`), `/api/incidents/{id}`, `/api/logs` (`q`, `service`, `level`, time window), `/api/logs/sources`, `/api/gpu`, `/api/settings`; `POST /api/poll`, `POST /api/services` (add/edit), `DELETE /api/services/{id}`, `PUT /api/services/{id}/policy`, `POST /api/services/{id}/restart`; `GET /api/agent/tools`, `POST /api/agent/call` (Bearer token from `data/mcp-token`). Times accept ISO (`2026-09-24T04:00`), a clock time (`04:00` = the last 04:00) or an age (`2h`, `30m`, `1d`).
+`GET /api/health` (`{"service": "cassandra-hoard", ...}`), `/api/status`, `/api/services`, `/api/services/{id}`, `/api/services/{id}/history`, `/api/lanes?hours=24`, `/api/incidents` (`since`, `until`, `at`, `window_min`, `service`, `open_only`), `/api/incidents/{id}`, `/api/logs` (`q`, `service`, `level`, time window), `/api/logs/sources`, `/api/gpu`, `/api/settings`; `POST /api/poll`, `POST /api/services` (add/edit), `DELETE /api/services/{id}`, `PUT /api/services/{id}/policy`, `POST /api/services/{id}/restart`; the websites: `GET /api/sites?hours=24`, `GET /api/sites/{id}/history`, `POST /api/sites` (add/edit), `POST /api/sites/check` (check now), `DELETE /api/sites/{id}`; `GET /api/agent/tools`, `POST /api/agent/call` (Bearer token from `data/mcp-token`). Times accept ISO (`2026-09-24T04:00`), a clock time (`04:00` = the last 04:00) or an age (`2h`, `30m`, `1d`).
 
 ## MCP tools
 
@@ -125,8 +139,11 @@ Optional Boop incident notifications are disabled by default. See [configuration
 | `audit_stats` | Agent calls per app and tool, failures, slowest, busiest callers, over a window. | no |
 | `secrets_audit` | Leaked secrets in app folders: token present, `data/` git-ignored, secret-looking files tracked by git, `.env` files. | no |
 | `faustus_attention` | Is Faustus waiting for me? Approvals and questions waiting on you, runs that stopped sending events, how long each has waited and the long waits (≥ `wait_min`). Read from Faustus's own attention list with a read-only token; says why when it cannot (no token, refused, Faustus down). | no |
+| `sites_status` | Are my websites up? Every public site (or one): state, HTTP status, latency, certificate days left, domain expiry date, DNS, warnings, open incident. | no |
+| `site_history` | One website's up/down timeline, latency (min/avg/p95/max and a series), incidents and the certificate/DNS/domain events of a window. | no |
 | `svc_restart` | Restart or start a service (only when the user asks). | yes |
 | `svc_watch` | Add or edit a watched service, its logs and restart policy (only when the user asks). | yes |
+| `sites_watch` | Add, edit or remove a watched public website (`add`, `edit`, `remove`; URL, expected status, keyword, interval; only when the user asks). | yes |
 
 ## Tests
 
@@ -137,13 +154,16 @@ npx vite build
 
 ## Privacy
 
-Everything is local: health checks go only to the URLs in the registry (loopback by default), logs are read from your own disk and stored in `data/cassandra.db`, nothing is sent anywhere and there is no telemetry. The API accepts only local origins (plus `CASSANDRA_ALLOWED_HOSTS`), and the agent routes need the token in `data/mcp-token`.
+Everything is local: health checks go only to the URLs in the registry (loopback by default) and to the websites you list in `data/sites.json` (one GET of the home page per interval with a User-Agent that names Cassandra's Hoard, one TLS handshake an hour, one RDAP lookup per domain a day; `CASSANDRA_SITES=0` turns all of it off), logs are read from your own disk and stored in `data/cassandra.db`, nothing is sent anywhere and there is no telemetry. The API accepts only local origins (plus `CASSANDRA_ALLOWED_HOSTS`), and the agent routes need the token in `data/mcp-token`.
 
 ## Limits (v1)
 
 - Probable causes are heuristics over what Cassandra saw; when it was not running, it can only say the event happened inside that gap.
 - The exit code of a process that Cassandra did not start is not available; it reports whether the process is gone or still alive.
 - GPU sampling is NVIDIA-only (`nvidia-smi`).
+- Websites are watched from this machine only: a failure of your own connection can look like every site being down (the probable cause says when DNS or the network itself failed). The confirming check after a first failure is the one request beyond the configured interval.
+- Domain expiry depends on the registry publishing it over RDAP; some TLDs do not, and then the card shows no domain days. A failed RDAP lookup is retried after 6 hours.
+- A CDN that rotates IP addresses shows up as DNS change events; they are informational.
 
 ## License
 

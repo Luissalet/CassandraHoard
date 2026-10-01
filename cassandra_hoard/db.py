@@ -109,6 +109,24 @@ MIGRATIONS: list[str] = [
     CREATE INDEX bus_events_type_ts ON bus_events(type, ts);
     CREATE INDEX bus_events_source_ts ON bus_events(source, ts);
     """,
+    # 3: public sites - the last state of each watched site and the cached RDAP answers (domain registration expiry)
+    """
+    CREATE TABLE site_state (
+      site TEXT PRIMARY KEY,
+      data TEXT NOT NULL DEFAULT '{}',
+      updated_at REAL NOT NULL
+    );
+    CREATE TABLE rdap_cache (
+      domain TEXT PRIMARY KEY,
+      checked_at REAL NOT NULL,
+      status TEXT NOT NULL,
+      expires_at REAL,
+      registrar TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT '',
+      warned TEXT NOT NULL DEFAULT '{}'
+    );
+    """,
 ]
 
 

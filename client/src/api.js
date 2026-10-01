@@ -40,4 +40,9 @@ export const api = {
   auditStats: (params) => request("GET", "/api/audit/stats", { params }),
   auditSync: () => request("POST", "/api/audit/sync"),
   secrets: () => request("GET", "/api/secrets"),
+  sites: (hours = 24) => request("GET", "/api/sites", { params: { hours } }),
+  siteHistory: (id, params) => request("GET", `/api/sites/${encodeURIComponent(id)}/history`, { params }),
+  watchSite: (body) => request("POST", "/api/sites", { body }),
+  unwatchSite: (id) => request("DELETE", `/api/sites/${encodeURIComponent(id)}`),
+  checkSites: (site) => request("POST", "/api/sites/check", { body: site ? { site } : {} }),
 };

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../api.js";
 import { useApp } from "../App.jsx";
 import { Lane, StatePill } from "../components/ui.jsx";
+import SitesCard from "./Sites.jsx";
 import { STATE_COLORS, clock, gb } from "../format.js";
 
 const GROUP_ORDER = ["faustus", "llm", "comfyui", "hub", "apps", "custom"];
@@ -188,6 +189,7 @@ export default function Panel() {
       </div>
       <Summary status={status} t={t} />
       <FaustusWaiting info={status?.faustus_attention} t={t} />
+      <SitesCard />
       <div className="flex items-center justify-between text-[12px]">
         <span className="help">{t("lanes_24h")}</span>
         <span className="help num">−24 {t("hours_ago")} · · · {t("now")}</span>

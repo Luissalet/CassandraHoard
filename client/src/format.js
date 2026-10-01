@@ -6,6 +6,7 @@ export const STATE_COLORS = {
   foreign: "var(--foreign)",
   never_seen: "var(--never)",
   unknown: "var(--never)",
+  disabled: "var(--never)",
 };
 
 export function clock(ts, lang) {

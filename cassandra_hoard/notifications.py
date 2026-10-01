@@ -1,5 +1,6 @@
 """Optional, best-effort Boop transport for incident lifecycle notifications."""
 
+import hashlib
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -47,6 +48,8 @@ class BoopNotifier:
             return False
         if type_ == "cassandra.faustus.waiting":
             return self._post(self._waiting_payload(data))
+        if type_ in ("cassandra.site.cert_expiring", "cassandra.site.domain_expiring"):
+            return self._post(self._expiry_payload(type_, data))
         if type_ not in ("cassandra.incident.opened", "cassandra.incident.closed"):
             return False
         iid = data.get("incident_id")
@@ -65,6 +68,32 @@ class BoopNotifier:
             "actions": [{"label": "Open Cassandra", "url": f"{self._public_url}/#/incidents/{iid}"}],
         }
         return self._post(payload)
+
+    def _expiry_payload(self, type_: str, data: dict) -> Optional[dict]:
+        """A site's certificate or domain is about to expire. A site going down or up is already an incident
+        notification. No site name, host or domain is forwarded: only that something expires and when."""
+        cert = type_.endswith("cert_expiring")
+        try:
+            days = int(data.get("days_left"))
+            threshold = int(data.get("threshold"))
+        except (TypeError, ValueError):
+            return None
+        key = str(data.get("site") if cert else data.get("domain") or "")
+        if not key:
+            return None
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+        kind = "cert" if cert else "domain"
+        fingerprint = f"cassandra:site:{digest}:{kind}"
+        what = "certificate" if cert else "domain"
+        return {
+            "title": f"Cassandra: a public site's {what} expires soon",
+            "body": f"{'Expired' if days < 0 else 'Expires in ' + str(days) + ' day(s)'}. Open Cassandra for details.",
+            "level": "warning",
+            "source": "cassandra",
+            "external_id": f"{fingerprint}:{threshold}",
+            "fingerprint": fingerprint,
+            "actions": [{"label": "Open Cassandra", "url": f"{self._public_url}/#/"}],
+        }
 
     def _waiting_payload(self, data: dict) -> Optional[dict]:
         kind = data.get("kind")

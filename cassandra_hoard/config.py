@@ -76,6 +76,8 @@ class Config:
     boop_api_key: str = field(default="", repr=False)
     public_url: str = ""  # user-configured URL reachable from the notification device
     faustus_wait_min: float = 15.0  # announce a Faustus approval/question waiting this long (0 = off)
+    sites: bool = True  # watch the public sites listed in data/sites.json (none are built in)
+    sites_tick_s: float = 15.0  # how often the site watcher looks for sites whose check is due
 
     @property
     def db_path(self) -> Path:
@@ -92,6 +94,10 @@ class Config:
     @property
     def services_path(self) -> Path:
         return self.data_dir / "services.json"
+
+    @property
+    def sites_path(self) -> Path:
+        return self.data_dir / "sites.json"
 
     @property
     def logs_dir(self) -> Path:
@@ -131,4 +137,6 @@ class Config:
             boop_api_key=_env("CASSANDRA_BOOP_API_KEY"),
             faustus_wait_min=_float(_env("CASSANDRA_FAUSTUS_WAIT_MIN"), 15.0, 0.0, 1440.0),
             public_url=_env("CASSANDRA_PUBLIC_URL"),
+            sites=_env("CASSANDRA_SITES", "1") != "0",
+            sites_tick_s=_float(_env("CASSANDRA_SITES_TICK_S"), 15.0, 1.0, 3600.0),
         )

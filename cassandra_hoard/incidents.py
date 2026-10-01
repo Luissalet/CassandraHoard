@@ -66,6 +66,17 @@ class Incidents:
             self.close(service, ts, to_state, incident_id=incident_id)
         return incident_id
 
+    def open_site(self, service: str, ts: float, *, from_state: str, detail: str, cause_code: str, cause_text: str,
+                  site: Optional[dict] = None) -> int:
+        """A public site that stayed down for several checks: kind ``site``, the cause is known from the check itself."""
+        context = {"correlated": [], "gpu": [], "log_tail": [], "process": None, "system": None, "port": None, "site": site or {},
+                   "causes": [{"code": cause_code, "weight": 100, "text": cause_text}]}
+        cur = self.db.execute(
+            "INSERT INTO incidents(service, kind, opened_at, from_state, to_state, detail, probable_cause, context, context_final) VALUES (?, 'site', ?, ?, 'down', ?, ?, ?, 1)",
+            (service, ts, from_state, detail[:500], cause_text[:500], json.dumps(context, ensure_ascii=False)),
+        )
+        return int(cur.lastrowid)
+
     def close(self, service: str, ts: float, to_state: str, incident_id: Optional[int] = None) -> Optional[int]:
         if incident_id is None:
             row = self.db.one("SELECT id FROM incidents WHERE service = ? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1", (service,))
@@ -119,7 +130,7 @@ class Incidents:
             {"service": r["service"], "name": self.name_of(r["service"]), "ts": r["ts"], "at": iso(r["ts"]), "kind": r["kind"],
              "from": r["from_state"], "to": r["to_state"], "delta_s": round(r["ts"] - ts, 1), "detail": r["detail"]}
             for r in self.db.query(
-                "SELECT * FROM events WHERE ts BETWEEN ? AND ? AND service != ? AND kind IN ('state', 'pid') ORDER BY ts",
+                "SELECT * FROM events WHERE ts BETWEEN ? AND ? AND service != ? AND service NOT LIKE 'site:%' AND kind IN ('state', 'pid') ORDER BY ts",
                 (ts - CORRELATION_S, ts + CORRELATION_S, service),
             )
         ]
