@@ -11,6 +11,7 @@ from . import SERVICE, __version__
 from .audit import BusMirror
 from .config import Config
 from .db import Database
+from .faustus_attention import Watcher as FaustusWatcher
 from .gpu import GpuReader
 from .incidents import Incidents
 from .logs import LogStore
@@ -66,6 +67,11 @@ class Services:
         self.bus = BusMirror(self.db, config.hub_url, clock_fn=clock_fn, incidents=self.incidents, emit=self._emit_event,
                              service_kind=lambda sid: (self.registry.get(sid).kind if self.registry.get(sid) else None),
                              **(bus_kwargs or {}))
+        # What Faustus is waiting on the person for (radar #403): announced
+        # once per long wait on the family bus and, if configured, Boop.
+        self.faustus_watch = FaustusWatcher(config.data_dir, wait_min=config.faustus_wait_min,
+                                            interval_s=max(60.0, config.poll_s * 3), emit=self._emit_event,
+                                            clock=clock_fn)
 
     def _emit_event(self, type_: str, data: dict[str, Any]) -> None:
         self.notifications.send(type_, data)
@@ -87,8 +93,10 @@ class Services:
             self.poller.start()
             if self.config.bus:
                 self.bus.start()
+            self.faustus_watch.start()
 
     def stop(self) -> None:
+        self.faustus_watch.stop()
         self.bus.stop()
         self.poller.stop()
         self.db.close()
@@ -138,6 +146,7 @@ class Services:
             "logs": self.logs.counts(),
             "bus": self.bus.status(),
             "notifications": self.notifications.status(),
+            "faustus_attention": self.faustus_watch.status(),
             "auto_restart": self.config.auto_restart,
             "registry_error": self.registry.load_error,
             "registry_source": self.registry.source,

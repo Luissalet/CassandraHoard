@@ -16,6 +16,7 @@ written to Faustus; nothing is sent anywhere but that loopback address.
 from __future__ import annotations
 
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -136,3 +137,94 @@ def report(data_dir: Path, *, wait_min: float = 10.0, url: Optional[str] = None,
     out = summarize(data.get("runs"), clock(), wait_min=wait_min)
     out.update({"ok": True, "url": url, "unread": data.get("unread_count")})
     return out
+
+# ---------------------------------------------------------------------------
+# Watching: tell the person once when something has waited too long
+# ---------------------------------------------------------------------------
+
+EVENT = "cassandra.faustus.waiting"
+
+
+class Watcher:
+    """Reads Faustus's attention list every ``interval_s`` and emits
+    :data:`EVENT` once per wait that passes ``wait_min`` minutes (an approval
+    or a question). A wait that is answered and comes back later is a new
+    wait. Off when ``wait_min`` is 0 or there is no token. Never raises.
+
+    After a restart a wait that is still open is announced again once:
+    nothing about Faustus's chats is stored on disk.
+    """
+
+    def __init__(self, data_dir: Path, *, wait_min: float, interval_s: float,
+                 emit: Callable[[str, dict[str, Any]], None],
+                 clock: Callable[[], float] = time.time,
+                 transport: Optional[httpx.BaseTransport] = None):
+        self.data_dir = Path(data_dir)
+        self.wait_min = float(wait_min)
+        self.interval_s = max(5.0, float(interval_s))
+        self.emit = emit
+        self.clock = clock
+        self.transport = transport
+        self.last: Optional[dict[str, Any]] = None
+        self.last_at: Optional[float] = None
+        self.notified: dict[str, float] = {}
+        self.sent = 0
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    @property
+    def enabled(self) -> bool:
+        return self.wait_min > 0
+
+    def tick(self) -> dict[str, Any]:
+        out = report(self.data_dir, wait_min=self.wait_min, transport=self.transport, clock=self.clock)
+        self.last, self.last_at = out, self.clock()
+        if not out.get("ok") or not self.enabled:
+            return out
+        open_keys = set()
+        for item in out.get("items") or []:
+            if item.get("kind") not in WAITING_ON_PERSON:
+                continue
+            key = f"{item.get('session_id')}:{item.get('kind')}"
+            open_keys.add(key)
+            waited = item.get("waited_min")
+            if waited is None or waited < self.wait_min or key in self.notified:
+                continue
+            self.notified[key] = self.clock()
+            data = {"session_id": item.get("session_id"), "kind": item.get("kind"),
+                    "waited_min": waited, "label": item.get("label") or ""}
+            try:
+                self.emit(EVENT, data)
+                self.sent += 1
+            except Exception:  # noqa: BLE001 - a broken transport never stops the watch
+                pass
+        for key in list(self.notified):
+            if key not in open_keys:
+                del self.notified[key]
+        return out
+
+    def start(self) -> None:
+        if not self.enabled or (self._thread and self._thread.is_alive()):
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="cassandra-faustus-watch", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.tick()
+            except Exception:  # noqa: BLE001
+                pass
+            self._stop.wait(self.interval_s)
+
+    def status(self) -> dict[str, Any]:
+        last = self.last or {}
+        return {"enabled": self.enabled, "wait_min": self.wait_min, "interval_s": self.interval_s,
+                "running": bool(self._thread and self._thread.is_alive()),
+                "ok": last.get("ok"), "reason": last.get("reason"), "url": last.get("url"),
+                "waiting_on_you": last.get("waiting_on_you"), "stalled": last.get("stalled"),
+                "long_waits": last.get("long_waits") or [], "checked_at": self.last_at, "sent": self.sent}

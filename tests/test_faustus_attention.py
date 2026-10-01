@@ -1,4 +1,5 @@
 """faustus_attention: what Faustus is waiting on the person for."""
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -80,3 +81,64 @@ def test_unknown_wait_is_not_zero():
     out = fa.summarize([{"session_id": "q", "kind": "question"}], NOW)
     assert out["waiting_on_you"] == 1 and out["oldest_wait_min"] is None
     assert out["items"][0]["waited_min"] is None and out["long_waits"] == []
+
+
+# -- the watcher -------------------------------------------------------------
+
+def _watcher(tmp_path, runs, events, wait_min=10):
+    (tmp_path / "faustus-token").write_text("t", encoding="utf-8")
+    box = {"runs": runs}
+
+    def handler(request):
+        return httpx.Response(200, json={"runs": box["runs"], "unread_count": 0})
+    w = fa.Watcher(tmp_path, wait_min=wait_min, interval_s=60, emit=lambda ty, d: events.append((ty, d)),
+                   clock=lambda: NOW, transport=httpx.MockTransport(handler))
+    return w, box
+
+
+def test_watcher_announces_each_long_wait_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("CASSANDRA_FAUSTUS_URL", "http://127.0.0.1:7000")
+    monkeypatch.delenv("CASSANDRA_FAUSTUS_TOKEN", raising=False)
+    events = []
+    w, box = _watcher(tmp_path, RUNS, events)
+    w.tick()
+    assert [(ty, d["session_id"], d["kind"]) for ty, d in events] == [(fa.EVENT, "s1", "approval")]
+    w.tick()
+    assert len(events) == 1  # still the same wait: no second alert
+    box["runs"] = [r for r in RUNS if isinstance(r, dict) and r["session_id"] != "s1"]
+    w.tick()
+    box["runs"] = RUNS
+    w.tick()
+    assert len(events) == 2  # answered, then a new wait: a new alert
+    st = w.status()
+    assert st["ok"] is True and st["sent"] == 2 and st["waiting_on_you"] == 2
+
+
+def test_watcher_off_and_without_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("CASSANDRA_FAUSTUS_TOKEN", raising=False)
+    events = []
+    off = fa.Watcher(tmp_path, wait_min=0, interval_s=60, emit=lambda *a: events.append(a))
+    assert off.enabled is False
+    off.start()
+    assert off.status()["running"] is False
+    w = fa.Watcher(tmp_path, wait_min=10, interval_s=60, emit=lambda *a: events.append(a), clock=lambda: NOW)
+    assert w.tick()["reason"] == "no_token" and events == []
+
+
+def test_boop_waiting_payload_carries_no_chat_content():
+    from cassandra_hoard.notifications import BoopNotifier
+    cfg = SimpleNamespace(boop_url="https://boop.example", boop_api_key="k", public_url="https://cass.example",
+                          boop_enabled=True, bus=True)
+    sent = []
+
+    class Client:
+        def post(self, url, json, headers, timeout, follow_redirects):
+            sent.append(json)
+            return SimpleNamespace(status_code=202)
+
+    n = BoopNotifier(cfg, client=Client())
+    assert n.send(fa.EVENT, {"session_id": "s1", "kind": "approval", "waited_min": 45.2, "label": "Secret plan"}) is True
+    body = json.dumps(sent[0])
+    assert "Secret plan" not in body and "45 min" in sent[0]["body"]
+    assert sent[0]["fingerprint"] == "cassandra:faustus:s1:approval"
+    assert n.send(fa.EVENT, {"session_id": "s1", "kind": "finished_unreviewed"}) is False

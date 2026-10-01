@@ -65,6 +65,43 @@ function Summary({ status, t }) {
   );
 }
 
+// What Faustus is waiting on the person for (read with a read-only token).
+function FaustusWaiting({ info, t }) {
+  if (!info || !info.enabled) return null;
+  if (info.ok === false) {
+    if (info.reason === "no_token") return null;
+    return (
+      <div className="panel help" data-testid="faustus-waiting">
+        {t("faustus_wait_title")}: {t(`faustus_reason.${info.reason}`)}
+      </div>
+    );
+  }
+  if (info.ok !== true) return null;
+  const waiting = info.waiting_on_you || 0;
+  const longWaits = info.long_waits || [];
+  return (
+    <div className="panel" data-testid="faustus-waiting">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="label">{t("faustus_wait_title")}</span>
+        <span className="help">{t("faustus_wait_rule").replace("{n}", info.wait_min)}</span>
+      </div>
+      <div className="mt-1 flex items-baseline gap-2">
+        <span className="num text-[22px] font-semibold" style={{ color: longWaits.length ? "var(--warn)" : waiting ? "var(--accent)" : "var(--ok)" }}>
+          {waiting}
+        </span>
+        <span className="help">{t("faustus_waiting_on_you")}{info.stalled ? ` · ${info.stalled} ${t("faustus_stalled")}` : ""}</span>
+      </div>
+      {longWaits.map((w) => (
+        <div key={`${w.session_id}:${w.kind}`} className="mt-1 text-[12px]" data-testid="faustus-long-wait">
+          <span className="chip" style={{ fontSize: 11 }}>{t(`faustus_kind.${w.kind}`)}</span>{" "}
+          <span>{w.label || w.session_id}</span>{" "}
+          <span className="help num">{Math.round(w.waited_min)} min</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Detail({ service, onRestart, t, lang }) {
   return (
     <div className="grid gap-2 px-3 pb-3 pt-1 text-[12px] md:grid-cols-[1fr_auto]" style={{ background: "var(--surface-2)" }}>
@@ -150,6 +187,7 @@ export default function Panel() {
         </button>
       </div>
       <Summary status={status} t={t} />
+      <FaustusWaiting info={status?.faustus_attention} t={t} />
       <div className="flex items-center justify-between text-[12px]">
         <span className="help">{t("lanes_24h")}</span>
         <span className="help num">−24 {t("hours_ago")} · · · {t("now")}</span>

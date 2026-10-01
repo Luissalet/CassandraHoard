@@ -1,5 +1,6 @@
 """Optional, best-effort Boop transport for incident lifecycle notifications."""
 
+from typing import Optional
 from urllib.parse import urlsplit
 
 import httpx
@@ -42,7 +43,11 @@ class BoopNotifier:
             self.enabled = True
 
     def send(self, type_: str, data: dict) -> bool:
-        if not self.enabled or type_ not in ("cassandra.incident.opened", "cassandra.incident.closed"):
+        if not self.enabled:
+            return False
+        if type_ == "cassandra.faustus.waiting":
+            return self._post(self._waiting_payload(data))
+        if type_ not in ("cassandra.incident.opened", "cassandra.incident.closed"):
             return False
         iid = data.get("incident_id")
         if not isinstance(iid, int) or isinstance(iid, bool) or iid < 1:
@@ -59,6 +64,32 @@ class BoopNotifier:
             "fingerprint": fingerprint,
             "actions": [{"label": "Open Cassandra", "url": f"{self._public_url}/#/incidents/{iid}"}],
         }
+        return self._post(payload)
+
+    def _waiting_payload(self, data: dict) -> Optional[dict]:
+        kind = data.get("kind")
+        sid = data.get("session_id")
+        if kind not in ("approval", "question") or not isinstance(sid, str) or not sid:
+            return None
+        try:
+            waited = int(float(data.get("waited_min") or 0))
+        except (TypeError, ValueError):
+            waited = 0
+        fingerprint = f"cassandra:faustus:{sid[:64]}:{kind}"
+        # No chat title, no content: only that something waits and for how long.
+        return {
+            "title": "Faustus is waiting for you",
+            "body": f"A chat has waited {waited} min for your {'approval' if kind == 'approval' else 'answer'}.",
+            "level": "warning",
+            "source": "cassandra",
+            "external_id": f"{fingerprint}:waiting",
+            "fingerprint": fingerprint,
+            "actions": [{"label": "Open Cassandra", "url": f"{self._public_url}/#/"}],
+        }
+
+    def _post(self, payload: Optional[dict]) -> bool:
+        if not payload:
+            return False
         client = self._client or httpx.Client(timeout=3.0, trust_env=False, follow_redirects=False)
         try:
             response = client.post(
