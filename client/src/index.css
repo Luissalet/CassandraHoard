@@ -1,26 +1,27 @@
 @import "tailwindcss";
+@import "./hoard-theme.css";
 
-/* Tokens from DESIGN.md — dark navy (the icon's background) with a magenta-crimson accent. */
+/* Own variables point at the shared --hoard-* tokens (hoard-theme.css). */
 :root {
   color-scheme: dark;
-  --accent: #d64a8a;
-  --accent-strong: #a3245f;
-  --accent-soft: #d64a8a22;
+  --accent: var(--hoard-accent);
+  --accent-strong: var(--hoard-accent-dim);
+  --accent-soft: var(--hoard-accent-soft);
   --gold: #e8b64a;
-  --bg: #07101f;
-  --sidebar: #050c18;
-  --surface: #0f1a2e;
-  --surface-2: #14213a;
-  --line: #22304b;
-  --ink: #e7eaf3;
-  --muted: #8b96b0;
-  --field: #0b1526;
+  --bg: var(--hoard-deep);
+  --sidebar: var(--hoard-surface);
+  --surface: var(--hoard-surface);
+  --surface-2: var(--hoard-elevated);
+  --line: var(--hoard-border);
+  --ink: var(--hoard-text);
+  --muted: var(--hoard-text-muted);
+  --field: var(--hoard-sunken);
   --ok: #3fb27f;
   --warn: #e0a43a;
   --danger: #e5534b;
   --foreign: #9a7cf0;
-  --never: #34405a;
-  --gap: #1b2438;
+  --never: var(--hoard-hover);
+  --gap: var(--hoard-elevated);
   --ok-bg: #3fb27f22;
   --warn-bg: #e0a43a22;
   --danger-bg: #e5534b22;
@@ -32,7 +33,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: "Segoe UI", system-ui, sans-serif;
+  font-family: var(--hoard-font-sans);
   font-size: 14px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
@@ -53,8 +54,8 @@ a { color: var(--accent); }
 }
 .btn:hover { border-color: var(--accent); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; }
-.btn-primary:hover { background: var(--accent); border-color: var(--accent); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--hoard-accent-ink); }
+.btn-primary:hover { background: var(--hoard-accent-strong); border-color: var(--hoard-accent-strong); }
 .btn-danger { background: var(--danger-bg); border-color: #e5534b66; color: #ffb4ae; }
 .btn-sm { min-height: 28px; padding: 3px 10px; font-size: 12px; }
 .btn-link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
@@ -64,7 +65,7 @@ a { color: var(--accent); }
   width: 100%; min-width: 0; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line);
   background: var(--field); color: var(--ink); font: inherit; font-size: 13px;
 }
-.field::placeholder { color: #5d6882; }
+.field::placeholder { color: var(--hoard-text-dim); }
 select.field { appearance: auto; }
 .label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--muted); }
 .help { font-size: 12px; color: var(--muted); }
@@ -77,7 +78,7 @@ select.field { appearance: auto; }
 
 .nav-link { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 7px; color: var(--ink); text-decoration: none; font-weight: 500; }
 .nav-link:hover { background: var(--surface); }
-.nav-link[aria-current="page"] { background: var(--accent-soft); color: #ffd1e5; font-weight: 600; }
+.nav-link[aria-current="page"] { background: var(--accent-soft); color: var(--hoard-text); font-weight: 500; }
 
 .svc-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) 120px minmax(160px, 2fr); gap: 12px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); cursor: pointer; }
 .svc-row:hover { background: var(--surface-2); }
@@ -94,12 +95,34 @@ select.field { appearance: auto; }
 @media (max-width: 767px) { .logline { grid-template-columns: 1fr; gap: 0; } }
 
 .switch { position: relative; width: 40px; height: 22px; border-radius: 11px; border: 0; background: var(--never); cursor: pointer; transition: background 0.16s; flex: none; padding: 0; }
-.switch[aria-checked="true"] { background: var(--accent-strong); }
-.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left 0.16s; }
+.switch[aria-checked="true"] { background: var(--accent); }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--hoard-text); transition: left 0.16s; }
 .switch[aria-checked="true"]::after { left: 21px; }
 .switch:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); padding: 10px 16px; border-radius: 8px; box-shadow: 0 8px 28px #0008; font-size: 13px; z-index: 50; max-width: calc(100vw - 32px); }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); padding: 10px 16px; border-radius: 8px; box-shadow: var(--hoard-shadow); font-size: 13px; z-index: 50; max-width: calc(100vw - 32px); }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 }
+
+/* Hoard family chrome (Writer's look): 220 px sidebar, 64 px brand row,
+   serif accent brand name, 10 px cards, quiet nav. */
+@media (min-width: 768px) {
+  .md\:grid-cols-\[216px_minmax\(0\,1fr\)\] { grid-template-columns: var(--hoard-sidebar-w) minmax(0, 1fr); }
+}
+aside { background: var(--hoard-surface) !important; border-color: var(--hoard-border) !important; }
+aside > :first-child { box-sizing: border-box; min-height: var(--hoard-header-h); padding-top: 0 !important; padding-bottom: 0 !important; border-bottom: 1px solid var(--hoard-border); }
+@media (min-width: 768px) { aside > :first-child { height: var(--hoard-header-h); } aside nav { padding-top: 12px; } }
+aside > :first-child > img { width: 32px; height: 32px; border-radius: var(--hoard-radius); }
+aside > :first-child > div > div:first-child { font-family: var(--hoard-font-serif); font-weight: 700; color: var(--hoard-accent); font-size: 15px; }
+.nav-link { min-height: 40px; border-radius: var(--hoard-radius); font-size: 14px !important; font-weight: 400; color: var(--hoard-text-muted); }
+.nav-link:hover { background: var(--hoard-elevated); color: var(--hoard-text); }
+.nav-link[aria-current="page"] svg { color: var(--hoard-accent); }
+main h1 { font-family: var(--hoard-font-serif); font-weight: 700 !important; font-size: 30px !important; color: var(--hoard-text); }
+.panel:hover { border-color: var(--hoard-border-hover); }
+.btn { border-radius: var(--hoard-radius); }
+.btn:hover { background: var(--hoard-elevated); border-color: var(--hoard-border-hover); }
+.field { border-radius: var(--hoard-radius); }
+.field:focus { border-color: var(--hoard-accent); outline: none; }
+.chip { border-radius: var(--hoard-radius-sm); }
+th { color: var(--hoard-text-dim); font-size: 12px; font-weight: 500; }
