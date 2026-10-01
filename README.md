@@ -86,6 +86,7 @@ Optional Boop incident notifications are disabled by default. See [configuration
 | `CASSANDRA_FAUSTUS_PYTHON` | this interpreter | Fills `{FAUSTUS_PYTHON}` in launch hints. |
 | `CASSANDRA_FAUSTUS_URL` | `http://127.0.0.1:7000` | The Faustus instance `faustus_attention` reads (loopback only). |
 | `CASSANDRA_FAUSTUS_TOKEN` | `data/faustus-token` | A Faustus API token with the `attention:read` scope (Settings → API tokens → Attention). Read-only. |
+| `CASSANDRA_FAUSTUS_WAIT_MIN` | `15` | With a token: an approval or question waiting this long in Faustus is announced once on the family bus (`cassandra.faustus.waiting`) and, if Boop is configured, as a notification with no chat content; the Panel shows a "Faustus is waiting for you" card. `0` = off. |
 | `CASSANDRA_GPU` | `1` | `0` = do not run `nvidia-smi`. |
 | `CASSANDRA_PORT_CHECK` | `1` | `0` = skip the listening-port shortcut (HTTP only). |
 | `CASSANDRA_AUTOSTART` | `1` | `0` = do not start the poller with the app. |

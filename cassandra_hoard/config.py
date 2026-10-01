@@ -75,6 +75,7 @@ class Config:
     boop_url: str = ""
     boop_api_key: str = field(default="", repr=False)
     public_url: str = ""  # user-configured URL reachable from the notification device
+    faustus_wait_min: float = 15.0  # announce a Faustus approval/question waiting this long (0 = off)
 
     @property
     def db_path(self) -> Path:
@@ -128,5 +129,6 @@ class Config:
             boop_enabled=_env("CASSANDRA_BOOP_ENABLED") == "1",
             boop_url=_env("CASSANDRA_BOOP_URL"),
             boop_api_key=_env("CASSANDRA_BOOP_API_KEY"),
+            faustus_wait_min=_float(_env("CASSANDRA_FAUSTUS_WAIT_MIN"), 15.0, 0.0, 1440.0),
             public_url=_env("CASSANDRA_PUBLIC_URL"),
         )
