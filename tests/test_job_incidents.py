@@ -262,6 +262,10 @@ def test_the_agenda_lists_open_incidents_only_and_needs_the_token(client):
     assert job["start"][:10] and job["end"] and not job["all_day"]
     # a window entirely in the future still shows an open incident? No: it lasts until now, so it does not overlap it
     assert agenda(client, **{"from": "2999-01-01", "to": "2999-01-31"}).json()["items"] == []
+    # an incident still open but older than a day is a state, not news: the agenda leaves it to Cassandra's own page
+    h.clock.advance(25 * 3600)
+    assert agenda(client).json()["items"] == []
+    h.clock.advance(-25 * 3600)
     # recovered/closed incidents are history
     h.net.apps[5183].mode = "up"
     h.tick(); h.tick()

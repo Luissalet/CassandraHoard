@@ -2,8 +2,9 @@
 
 Only real dated things Cassandra knows: every incident that is still open (a service or site that is down, a job that failed
 and has not been followed by a successful one) is one item of kind ``incident`` and priority ``high``. It starts when the
-incident opened and runs until now, so the hub's Today list shows it on every day it stays open. Closed incidents are history
-and are not listed. ``provider(...)`` is what ``fam_agenda.install_fastapi`` calls; it never raises.
+incident opened and runs until now. Only incidents opened in the last ``RECENT_S`` (24 h) are listed: an app that went down
+days ago and was never started again is a state, not news (it stays in Cassandra's own incidents page). Closed incidents are
+history and are not listed. ``provider(...)`` is what ``fam_agenda.install_fastapi`` calls; it never raises.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Any, Callable
 
 MAX_ITEMS = 50
+RECENT_S = 24 * 3600.0
 
 
 def _moment(ts: float) -> str:
@@ -39,6 +41,8 @@ def build_items(svc: Any, date_from: date, date_to: date, *, base_url: str) -> l
         if inc["kind"] == "restart" or not inc.get("open"):
             continue
         opened = float(inc["opened_at"])
+        if now - opened > RECENT_S:
+            continue
         if opened > end_of or now < start_of:        # an open incident lasts until now: it must overlap the window
             continue
         name = svc.name_of(inc["service"])
