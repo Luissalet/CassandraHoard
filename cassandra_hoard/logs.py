@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Iterable, Optional
 
+from .hoard_link.text import slugify
+
 FIRST_READ_BYTES = 64 * 1024
 MAX_READ_BYTES = 1024 * 1024
 MAX_FILES = 400
@@ -69,7 +71,8 @@ def level_of(line: str) -> str:
 
 
 def slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+    """``Cassandra's Hoard`` -> ``cassandrashoard`` (letters and digits only, accents folded)."""
+    return slugify(text, sep="", max_len=0)
 
 
 @dataclass

@@ -36,6 +36,8 @@ from typing import Any, Callable, Optional
 
 import httpx
 
+from .hoard_link import proc
+
 log = logging.getLogger("cassandra.audit")
 
 POLL_S = 10.0
@@ -319,7 +321,7 @@ def _tracked_files(folder: Path, timeout: float = 10.0) -> Optional[list[str]]:
     if not (folder / ".git").exists():
         return None
     try:
-        out = subprocess.run(["git", "-C", str(folder), "ls-files", "-z"], capture_output=True, timeout=timeout, check=False)
+        out = proc.run(["git", "-C", str(folder), "ls-files", "-z"], timeout=timeout, text=False)  # no console window on Windows
     except (OSError, subprocess.TimeoutExpired):
         return None
     if out.returncode != 0:

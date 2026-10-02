@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
-import sys
 from dataclasses import dataclass
 from typing import Any, Optional
+
+from .hoard_link import proc
 
 QUERY = ["--query-gpu=index,memory.used,memory.total,utilization.gpu", "--format=csv,noheader,nounits"]
 
@@ -52,14 +50,8 @@ def parse_nvidia_smi(text: str) -> list[GpuSample]:
 
 
 def find_nvidia_smi() -> Optional[str]:
-    found = shutil.which("nvidia-smi")
-    if found:
-        return found
-    if sys.platform.startswith("win"):
-        for candidate in (r"C:\Windows\System32\nvidia-smi.exe", r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"):
-            if os.path.isfile(candidate):
-                return candidate
-    return None
+    return proc.find_exe("nvidia-smi", explicit=None, env_vars=(),
+                         extra_dirs=(r"C:\Windows\System32", r"C:\Program Files\NVIDIA Corporation\NVSMI"))
 
 
 class GpuReader:
@@ -72,11 +64,8 @@ class GpuReader:
     def __call__(self) -> list[GpuSample]:
         if not self.exe:
             return []
-        kwargs: dict[str, Any] = {}
-        if sys.platform.startswith("win"):
-            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
-            result = subprocess.run([self.exe, *QUERY], capture_output=True, text=True, timeout=8, **kwargs)
+            result = proc.run([self.exe, *QUERY], timeout=8)
         except Exception as error:  # noqa: BLE001
             self.error = str(error)
             return []

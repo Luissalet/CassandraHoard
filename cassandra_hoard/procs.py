@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from .hoard_link import proc
+
 
 def _psutil():
     try:
@@ -45,7 +47,7 @@ def _listening_pids_cli() -> Optional[dict[int, int]]:
     out: dict[int, int] = {}
     try:
         if sys.platform.startswith("win"):
-            text = subprocess.run(["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True, timeout=10).stdout
+            text = proc.run(["netstat", "-ano", "-p", "tcp"], timeout=10).stdout
             for line in text.splitlines():
                 parts = line.split()
                 if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[3].upper() == "LISTENING":
@@ -53,7 +55,7 @@ def _listening_pids_cli() -> Optional[dict[int, int]]:
                     if m:
                         out.setdefault(int(m.group(1)), int(parts[4]))
         else:
-            text = subprocess.run(["ss", "-ltnp"], capture_output=True, text=True, timeout=10).stdout
+            text = proc.run(["ss", "-ltnp"], timeout=10).stdout
             for line in text.splitlines()[1:]:
                 m = re.search(r":(\d+)\s", line)
                 if m:
@@ -137,9 +139,9 @@ def boot_time() -> Optional[float]:
 
 
 def detached_kwargs() -> dict[str, Any]:
+    """Popen keyword arguments that detach a shell-string command from us (no console window on Windows)."""
     if sys.platform.startswith("win"):
-        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        return {"creationflags": flags}
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | proc.no_window_kwargs().get("creationflags", 0)}
     return {"start_new_session": True}
 
 
@@ -154,9 +156,9 @@ def spawn_detached(cmd: Any, cwd: Optional[str], log_path: str, env: Optional[di
         shown = cmd if isinstance(cmd, str) else " ".join(cmd)
         log.write(f"\n--- cassandra restart {time.strftime('%Y-%m-%d %H:%M:%S')}: {shown}\n".encode("utf-8"))
         log.flush()
-        return subprocess.Popen(
-            cmd, cwd=cwd or None, env=full_env, shell=isinstance(cmd, str), stdin=subprocess.DEVNULL,
-            stdout=log, stderr=subprocess.STDOUT, close_fds=True, **detached_kwargs(),
-        )
+        if isinstance(cmd, str):  # a shell command line: the shared helper only takes argument lists
+            return subprocess.Popen(cmd, cwd=cwd or None, env=full_env, shell=True, stdin=subprocess.DEVNULL,
+                                    stdout=log, stderr=subprocess.STDOUT, close_fds=True, **detached_kwargs())
+        return proc.popen(cmd, detached=True, cwd=cwd or None, env=full_env, stdout=log, stderr=subprocess.STDOUT)
     finally:
         log.close()

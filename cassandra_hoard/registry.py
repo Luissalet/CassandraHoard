@@ -35,6 +35,8 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 from urllib.parse import urlsplit
 
+from .hoard_link import atomic
+
 MANIFEST_NAME = "faustus-plugin.json"
 SELF_ID = "cassandra"
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
@@ -410,11 +412,7 @@ class Registry:
         return {"services": services, "policies": policies}
 
     def _write_file(self) -> None:
-        path = self.config.services_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self._file, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)
+        atomic.write_json_atomic(self.config.services_path, self._file)
 
     # ---------- merge ----------
     def reload(self) -> list[Service]:

@@ -27,6 +27,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from . import __version__
+from .hoard_link.web import fetch, urls
 
 USER_AGENT = f"Cassandra's Hoard site check/{__version__} (monitor run by the site owner)"
 HTTP_TIMEOUT_S = 15.0
@@ -42,41 +43,25 @@ RDAP_RETRY_S = 6 * 3600.0  # after a transport failure
 RDAP_BOOTSTRAP_TTL_S = 7 * 86400.0
 RDAP_TIMEOUT_S = 10.0
 
-# Second-level suffixes where the registrable domain has three labels. This is
-# not the full public suffix list: the site's `domain` field overrides it.
-TWO_LEVEL_SUFFIXES = frozenset({
-    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk", "net.uk", "sch.uk",
-    "com.au", "net.au", "org.au", "edu.au", "gov.au", "co.nz", "org.nz", "net.nz",
-    "co.jp", "ne.jp", "or.jp", "co.kr", "or.kr", "com.br", "net.br", "org.br", "com.mx", "org.mx",
-    "com.ar", "com.co", "com.pe", "com.ve", "com.uy", "co.in", "net.in", "org.in", "co.za", "org.za",
-    "com.tr", "com.cn", "net.cn", "org.cn", "com.hk", "com.sg", "com.tw", "com.my", "com.ph", "co.id",
-    "co.il", "com.ua", "com.pl", "com.es", "nom.es", "org.es",
-})
-
-
 # ---------------------------------------------------------------------------
 # domains
 # ---------------------------------------------------------------------------
 
 def registrable_domain(host: str, override: str = "") -> Optional[str]:
-    """``www.shop.example.co.uk`` -> ``example.co.uk``; None for an IP address or a single label."""
+    """``www.shop.example.co.uk`` -> ``example.co.uk`` (the shared public-suffix table); None for an IP address or a
+    single label (nothing to look up). A configured ``override`` wins."""
     override = (override or "").strip().lower().strip(".")
     if override:
         return override
-    host = (host or "").strip().lower().strip(".")
-    if not host:
+    host = (host or "").strip().lower().strip(".").strip("[]")
+    if not host or "." not in host:
         return None
     try:
-        ipaddress.ip_address(host.strip("[]"))
+        ipaddress.ip_address(host)
         return None
     except ValueError:
         pass
-    labels = host.split(".")
-    if len(labels) < 2:
-        return None
-    if ".".join(labels[-2:]) in TWO_LEVEL_SUFFIXES and len(labels) >= 3:
-        return ".".join(labels[-3:])
-    return ".".join(labels[-2:])
+    return urls.registrable_domain(host)
 
 
 # ---------------------------------------------------------------------------
@@ -116,32 +101,13 @@ def dns_check(host: str, port: int = 443, *, timeout: float = DNS_TIMEOUT_S) -> 
 # HTTP
 # ---------------------------------------------------------------------------
 
-def _chain(error: BaseException) -> list[BaseException]:
-    out: list[BaseException] = []
-    seen = set()
-    while error is not None and id(error) not in seen and len(out) < 10:
-        out.append(error)
-        seen.add(id(error))
-        error = error.__cause__ or error.__context__  # type: ignore[assignment]
-    return out
-
-
 def classify_error(error: BaseException, host: str, timeout: float) -> dict[str, str]:
-    """An exception from httpx or the ssl module -> ``{kind, detail}`` with kind dns|tls|timeout|refused|reset|other."""
-    for item in _chain(error):
-        if isinstance(item, socket.gaierror):
-            return {"kind": "dns", "detail": f"DNS failure: {host} does not resolve ({item.strerror or item})"}
-        if isinstance(item, ssl.SSLCertVerificationError):
-            return {"kind": "tls", "detail": f"TLS error: {item.verify_message or item.reason or item}"}
-        if isinstance(item, ssl.SSLError):
-            return {"kind": "tls", "detail": f"TLS error: {item.reason or item}"}
-        if isinstance(item, (httpx.TimeoutException, socket.timeout, TimeoutError)):
-            return {"kind": "timeout", "detail": f"Timeout: no answer within {timeout:.0f} s"}
-        if isinstance(item, ConnectionRefusedError):
-            return {"kind": "refused", "detail": "Connection refused: nothing accepts connections on that port"}
-        if isinstance(item, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
-            return {"kind": "reset", "detail": "Connection reset by the server"}
-    return {"kind": "other", "detail": f"{type(error).__name__}: {error}"[:300]}
+    """An exception from httpx or the ssl module -> ``{kind, detail}`` with kind dns|tls|timeout|refused|reset|other.
+
+    The classification is the shared fetcher's (it also reads a dropped HTTP connection as ``reset``); this keeps
+    the monitor's dict shape and its ``other`` kind (the shared ``network``)."""
+    kind, detail = fetch.classify_error(error, host, timeout)
+    return {"kind": "other" if kind == "network" else kind, "detail": detail}
 
 
 def http_check(url: str, *, timeout: float = HTTP_TIMEOUT_S, follow: bool = False,
@@ -386,18 +352,21 @@ class RdapChecker:
                             headers={"Accept": "application/rdap+json, application/json", "User-Agent": USER_AGENT}), True
 
     def _bases(self, client: httpx.Client, tld: str, now: float) -> list[str]:
-        raw = self.db.get_setting("rdap_bootstrap")
-        boot: Optional[dict[str, Any]] = None
-        try:
-            boot = json.loads(raw) if raw else None
-        except ValueError:
+        raw = self.db.get_setting("rdap_bootstrap")  # a dict (new rows) or JSON text (rows written before the shared database helper)
+        boot: Optional[dict[str, Any]] = raw if isinstance(raw, dict) else None
+        if boot is None and isinstance(raw, str) and raw:
+            try:
+                boot = json.loads(raw)
+            except ValueError:
+                boot = None
+        if not isinstance(boot, dict):
             boot = None
         if boot is None or now - float(boot.get("fetched_at", 0)) >= RDAP_BOOTSTRAP_TTL_S:
             try:
                 response = client.get(RDAP_BOOTSTRAP_URL)
                 if response.status_code == 200:
                     boot = {"fetched_at": now, "services": response.json().get("services", [])}
-                    self.db.set_setting("rdap_bootstrap", json.dumps(boot))
+                    self.db.set_setting("rdap_bootstrap", boot)
             except (httpx.HTTPError, ValueError):
                 pass  # keep a stale copy when there is one
         bases: list[str] = []

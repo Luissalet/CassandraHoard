@@ -28,6 +28,7 @@ from typing import Any, Callable, Optional
 from urllib.parse import urlsplit
 
 from . import sites_net, views
+from .hoard_link import atomic
 from .times import clock, duration, iso
 
 SITE_PREFIX = "site:"
@@ -204,10 +205,7 @@ class SiteStore:
         self.load_error = "; ".join(problems) or None
 
     def _write(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"sites": self._sites}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        tmp.replace(self.path)
+        atomic.write_json_atomic(self.path, {"sites": self._sites})
         self._stamp = self._fingerprint()
 
     def list(self) -> list[dict[str, Any]]:
