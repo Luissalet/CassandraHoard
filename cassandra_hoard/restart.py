@@ -33,7 +33,8 @@ HUB_TIMEOUT_S = 1.5
 
 class Restarter:
     def __init__(self, db, config, registry, incidents, clock_fn: Callable[[], float] = time.time,
-                 hub_client: Optional[httpx.Client] = None, spawn: Callable[..., Any] = procs.spawn_detached):
+                 hub_client: Optional[httpx.Client] = None, spawn: Callable[..., Any] = procs.spawn_detached,
+                 stop_fn: Optional[Callable[[int, Optional[float]], dict[str, Any]]] = None):
         self.db = db
         self.config = config
         self.registry = registry
@@ -41,6 +42,8 @@ class Restarter:
         self.clock = clock_fn
         self.hub_client = hub_client
         self.spawn = spawn
+        # Injectable so tests never signal a real process that happens to have a fake pid.
+        self.stop_fn = stop_fn or self._stop
         self._lock = threading.Lock()
         self._busy: set[str] = set()
 
@@ -141,7 +144,7 @@ class Restarter:
                 method = "launch"
         if method in ("cmd", "launch"):
             if running and pid:
-                stopped = self._stop(pid, pid_started)
+                stopped = self.stop_fn(pid, pid_started)
                 if not stopped["ok"]:
                     ok, detail = False, f"could not stop the running process: {stopped['error']}"
                     return self._record(service, now, trigger, method, ok, detail, incident_id)

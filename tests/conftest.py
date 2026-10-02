@@ -157,6 +157,7 @@ class Harness:
         self.alive: dict[int, bool] = {}
         self.boot = T0 - 3600
         self.spawned: list[tuple] = []
+        self.stopped: list[int] = []
         for app_id, port in (apps or {}).items():
             write_manifest(self.apps_root, f"{app_id.title()}Hoard", app_id, port)
             self.net.add(port, f"{app_id}-hoard")
@@ -176,13 +177,20 @@ class Harness:
             poller_kwargs=dict(transport=self.net, listeners_fn=self.net.listeners, proc_fn=self.proc,
                                alive_fn=lambda pid, started=None: self.alive.get(pid), boot_fn=lambda: self.boot,
                                gpu_reader=self.gpu, restart_async=False),
-            restarter_kwargs=dict(hub_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599))), spawn=spawn),
+            # stop_fn: fake pids must never reach psutil (on a busy machine a fake pid can be a real process)
+            restarter_kwargs=dict(hub_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599))), spawn=spawn,
+                                  stop_fn=self.stop_process),
             # hermetic: the real hub may be running on this machine
             registry_kwargs=dict(hub_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599)))),
             # hermetic: the public-site checks (and RDAP) never touch the real network
             sites_kwargs=dict(http_fn=self.sitenet.http_fn, tls_fn=self.sitenet.tls_fn, dns_fn=self.sitenet.dns_fn,
                               rdap_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(599)))),
         )
+
+    def stop_process(self, pid, started=None):
+        self.stopped.append(pid)
+        self.alive[pid] = False
+        return {"ok": True}
 
     def proc(self, pid):
         from cassandra_hoard.procs import ProcInfo
