@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from . import faustus_attention, faustus_farm, views
 from .audit import secrets_audit
+from .hoard_link import agentkit
+from .hoard_link.agentkit import Tool, ann as _ann
 from .incidents import explain
 from .poller import OK_STATES
 from .services import Services
@@ -23,10 +24,6 @@ Times accept ISO (2026-09-24T04:00), a clock time (04:00 = the last 04:00), or a
 "¿qué está haciendo Faustus ahora?" / "what is Faustus running right now?" / "¿cuánto presupuesto queda?" → faustus_farm (every chat turn in flight with the sub-agents it started grouped under it, dispatched jobs and their workers, a night shift, workflow runs and scheduled tasks, each with state, model, age and progress; plus the period budget: window used against its pace line, GPU seconds today, failure breaker, provider cooldowns). It carries names and states, never what anyone typed. Quote its titles, states and ages; a stalled item is one that stopped sending events, not a proven failure.
 Public websites (the sites other people use, watched from outside; the list is data/sites.json): "¿está mi web caída?" / "is my website up?", "¿cuándo caduca el certificado o el dominio?" / "when does the certificate or the domain expire?" → sites_status (state, latency, certificate days left, domain days left from RDAP, last change; a domain whose RDAP answer is unknown is unknown, not fine); "¿ha estado caída esta semana?" / "was it down this week?" → site_history. A site is down only after two failed checks in a row; its incidents (kind site) also appear in svc_incidents as service site:<id>. Certificate and domain dates are checked, not guessed: quote them with their days left.
 svc_restart, svc_watch and sites_watch change things: never restart a service or edit the watch list (services or sites) unless the user explicitly asks for it."""
-
-
-class Empty(BaseModel):
-    pass
 
 
 class StatusArgs(BaseModel):
@@ -131,15 +128,6 @@ class FaustusAttentionArgs(BaseModel):
 
 class FaustusFarmArgs(BaseModel):
     include_budget: bool = Field(True, description="Also return the period budget (pace, GPU seconds today, breaker, cooldowns). False = only what is running.")
-
-
-@dataclass(frozen=True)
-class Tool:
-    name: str
-    description: str
-    input_model: type[BaseModel]
-    annotations: dict[str, bool]
-    run: Callable[[Services, Any], Any]
 
 
 def _brief_state(s: dict[str, Any]) -> dict[str, Any]:
@@ -434,10 +422,6 @@ def run_sites_watch(services: Services, args: SitesWatchArgs) -> dict:
             "note": "Saved in data/sites.json; the first check runs within seconds." if created else "Saved in data/sites.json."}
 
 
-def _ann(read_only: bool, destructive: bool = False, idempotent: bool | None = None) -> dict[str, bool]:
-    return {"readOnlyHint": read_only, "destructiveHint": destructive, "idempotentHint": read_only if idempotent is None else idempotent, "openWorldHint": False}
-
-
 TOOLS: list[Tool] = [
     Tool("svc_status", "Is it up? Live status of every local AI service and app / ¿Está caído? Estado actual de servicios\nOne service or all: state (up, degraded, foreign, down, never_seen), since when, latency, pid, uptime, open incident, restart policy. Includes machine boot time and GPUs now.\nSinónimos: estado, caído, funciona, arriba, abajo, servicio, puerto, Faustus, Ollama, llama-server, ComfyUI, hub, app.", StatusArgs, _ann(True), run_status),
     Tool("svc_incidents", "Incidents (service down, restarted) in a time window / Incidencias y caídas en un intervalo de tiempo\nFilter by since/until or at='04:00' ± window_min, by service, or only open ones. Each has the probable cause and what else changed. Also lists reboots and periods when Cassandra itself was not running.\nSinónimos: qué pasó, caídas, incidencias, anoche, a las 4, se paró todo, cortes, historial.", IncidentsArgs, _ann(True), run_incidents),
@@ -461,15 +445,9 @@ TOOLS_BY_NAME = {tool.name: tool for tool in TOOLS}
 
 
 def tool_catalog() -> list[dict]:
-    return [
-        {"name": t.name, "description": t.description, "annotations": t.annotations, "inputSchema": t.input_model.model_json_schema(by_alias=True)}
-        for t in TOOLS
-    ]
+    return agentkit.tool_catalog(TOOLS)
 
 
 def call_tool(services: Services, name: str, arguments: dict | None) -> Any:
-    tool = TOOLS_BY_NAME.get(name)
-    if tool is None:
-        raise KeyError(f"Unknown tool: {name}")
-    args = tool.input_model.model_validate(arguments or {})
-    return tool.run(services, args)
+    """Run one tool by name (arguments validated, result capped like the assistant's). ``KeyError`` for an unknown name."""
+    return agentkit.call_tool(TOOLS, services, name, arguments)
