@@ -6,10 +6,9 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from .. import SERVICE, __version__, views
+from .. import views
 from ..times import iso, window
 from .deps import services
-from ..hoard_link import family
 
 router = APIRouter(prefix="/api")
 
@@ -26,12 +25,6 @@ def _service(svc, text: str):
         return svc.resolve(text)
     except LookupError as error:
         raise HTTPException(404, str(error)) from error
-
-
-@router.get("/health")
-def health(request: Request):
-    return {"service": SERVICE, "version": __version__, "dataDirConfigured": request.app.state.config.data_dir_configured,
-            "hoard_link": family.health_block()}
 
 
 @router.get("/status")
