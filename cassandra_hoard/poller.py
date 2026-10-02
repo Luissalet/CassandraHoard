@@ -254,7 +254,7 @@ class Poller:
         if now - self._last_prune >= PRUNE_S:
             self.prune(now)
             self._last_prune = now
-        self.db.set_setting("last_tick", repr(now))
+        self.db.set_setting("last_tick", now)
         self.ticks += 1
         self.last_tick = now
         self.last_tick_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -284,7 +284,7 @@ class Poller:
                 self.db.execute("INSERT INTO events(service, ts, kind, from_state, to_state, detail) VALUES ('system', ?, 'reboot', NULL, NULL, ?)",
                                 (boot, f"the machine booted at {iso(boot)} (previous boot {iso(prev)})"))
             if prev_raw is None or (prev and abs(boot - prev) > 30):
-                self.db.set_setting("boot_time", repr(boot))
+                self.db.set_setting("boot_time", boot)
             self.boot_time = boot
         return system
 
