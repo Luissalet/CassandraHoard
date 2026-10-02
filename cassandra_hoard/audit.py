@@ -48,8 +48,10 @@ SECRET_FOLDERS = ("data", "data-demo", ".venv", "venv")
 class BusMirror:
     def __init__(self, db: Any, hub_url: str, *, clock_fn: Callable[[], float] = time.time, poll_s: float = POLL_S,
                  client: Optional[httpx.Client] = None, incidents: Any = None, emit: Optional[Callable[..., Any]] = None,
-                 service_kind: Optional[Callable[[str], Optional[str]]] = None):
+                 service_kind: Optional[Callable[[str], Optional[str]]] = None, job_incidents: Any = None):
         self.db = db
+        #: ``process(events)`` opens/closes the incidents of failed jobs from the events just stored; ``expire()`` closes old ones
+        self._job_incidents = job_incidents
         #: ``service id -> app | external | user``: what a hub rule needs to know whether ``start_app``
         #: can do anything about the incident (only a hub-managed ``app`` can be started by the hub).
         self._service_kind = service_kind
@@ -83,6 +85,7 @@ class BusMirror:
 
     def store(self, events: list[dict[str, Any]]) -> int:
         n = 0
+        fresh: list[dict[str, Any]] = []
         with self.db.lock:
             for ev in events:
                 try:
@@ -102,9 +105,15 @@ class BusMirror:
                 )
                 if cur.rowcount:
                     n += 1
+                    fresh.append({"type": str(ev.get("type") or ""), "source": str(ev.get("source") or ""), "ts": ts, "data": data})
                 if hub_id > self.last_hub_id:
                     self.last_hub_id = hub_id
         self.synced += n
+        if fresh and self._job_incidents is not None:
+            try:
+                self._job_incidents.process(fresh)
+            except Exception:  # noqa: BLE001
+                log.exception("job incidents failed")
         return n
 
     # ---------- syncing ----------
@@ -156,7 +165,7 @@ class BusMirror:
             if prev is None and iid not in self._reported_incidents:
                 if r["kind"] != "restart" and (self.clock() - float(r["opened_at"])) < 3600:
                     self._emit("cassandra.incident.opened", {"incident_id": iid, "app": r["service"], "kind": r["kind"],
-                                                            "service_kind": self._kind_of(r["service"]),
+                                                            "service_kind": "job" if r["kind"] == "job" else self._kind_of(r["service"]),
                                                             "to_state": r["to_state"], "detail": (r["detail"] or "")[:200],
                                                             "probable_cause": (r["probable_cause"] or "")[:200]})
                     sent += 1
@@ -184,6 +193,11 @@ class BusMirror:
             self.sync_once()
         except Exception as exc:  # noqa: BLE001
             self.last_error = f"{type(exc).__name__}: {exc}"
+        if self._job_incidents is not None:
+            try:
+                self._job_incidents.expire()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("job incident expiry failed: %s", exc)
         try:
             self.report_incidents()
         except Exception as exc:  # noqa: BLE001

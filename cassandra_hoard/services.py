@@ -14,6 +14,7 @@ from .db import Database
 from .faustus_attention import Watcher as FaustusWatcher
 from .gpu import GpuReader
 from .incidents import Incidents
+from .job_incidents import JobIncidents
 from .logs import LogStore
 from .notifications import BoopNotifier
 from .poller import Poller
@@ -64,8 +65,11 @@ class Services:
         if "gpu_reader" not in kwargs and config.gpu:
             kwargs["gpu_reader"] = GpuReader()
         self.poller = Poller(config, self.db, self.registry, self.logs, self.incidents, self.restarter, clock_fn=clock_fn, **kwargs)
+        # Failed jobs on the mirrored bus become incidents of kind "job".
+        self.job_incidents = JobIncidents(self.db, self.incidents, clock_fn=clock_fn)
         # The family bus, mirrored for good: what the assistant and the apps did.
         self.bus = BusMirror(self.db, config.hub_url, clock_fn=clock_fn, incidents=self.incidents, emit=self._emit_event,
+                             job_incidents=self.job_incidents if config.job_incidents else None,
                              service_kind=lambda sid: ("site" if sid.startswith(SITE_PREFIX)
                                                        else self.registry.get(sid).kind if self.registry.get(sid) else None),
                              **(bus_kwargs or {}))

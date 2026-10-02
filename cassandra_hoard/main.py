@@ -16,7 +16,8 @@ from .api import ROUTERS
 from .config import Config
 from .guard import install_guard
 from .services import Services
-from .hoard_link import family
+from .agenda import make_provider
+from .hoard_link import fam_agenda, family
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -55,6 +56,9 @@ def create_app(config: Config | None = None, services: Services | None = None) -
 
     for router in ROUTERS:
         app.include_router(router)
+
+    # the family agenda (open incidents): the hub asks with this app's bearer token
+    fam_agenda.install_fastapi(app, make_provider(lambda: getattr(app.state, "services", None), lambda: f"http://127.0.0.1:{config.port}"))
 
     @app.get("/{path:path}", include_in_schema=False)
     async def spa(path: str):

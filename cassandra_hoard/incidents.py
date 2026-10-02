@@ -79,7 +79,8 @@ class Incidents:
 
     def close(self, service: str, ts: float, to_state: str, incident_id: Optional[int] = None) -> Optional[int]:
         if incident_id is None:
-            row = self.db.one("SELECT id FROM incidents WHERE service = ? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1", (service,))
+            # a job incident (kind "job") belongs to the job bookkeeping, not to the service going up again
+            row = self.db.one("SELECT id FROM incidents WHERE service = ? AND closed_at IS NULL AND kind != 'job' ORDER BY opened_at DESC LIMIT 1", (service,))
             if row is None:
                 return None
             incident_id = row["id"]
@@ -88,7 +89,7 @@ class Incidents:
         return incident_id
 
     def open_for(self, service: str) -> Optional[dict[str, Any]]:
-        row = self.db.one("SELECT * FROM incidents WHERE service = ? AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1", (service,))
+        row = self.db.one("SELECT * FROM incidents WHERE service = ? AND closed_at IS NULL AND kind != 'job' ORDER BY opened_at DESC LIMIT 1", (service,))
         return _row(row) if row else None
 
     def add_action(self, incident_id: int, action: dict[str, Any]) -> None:
@@ -272,6 +273,23 @@ def explain(item: dict[str, Any], name: str, port: Optional[int], now: float) ->
     ctx = item.get("context") or {}
     where = f" (port {port})" if port else ""
     sentences = []
+    if item["kind"] == "job":
+        job = ctx.get("job") or {}
+        label = f"{job.get('kind')} job " if job.get("kind") else "job "
+        sentences.append(f"A {label}“{job.get('title') or '?'}” of {name} failed at {clock(item['opened_at'])}" + (f": {job['error']}" if job.get("error") else " (no error text was reported)."))
+        if job.get("failures", 1) > 1:
+            sentences.append(f"It failed {job['failures']} times since; the cause shown is the latest.")
+        if item.get("closed_at"):
+            ended = next((a for a in reversed(item.get("actions") or []) if a.get("kind") in ("job_done", "expired")), None)
+            how = "a later job of the same kind finished" if ended and ended.get("kind") == "job_done" else "no new failure came in 24 hours"
+            sentences.append(f"Closed at {clock(item['closed_at'])}, after {duration(item['closed_at'] - item['opened_at'])}: {how}.")
+        else:
+            sentences.append(f"Still open ({duration(now - item['opened_at'])} so far); it closes when a job of the same kind finishes or after 24 hours.")
+        events = (ctx.get("job_events") or [])[-6:]
+        steps = [e["type"].split(".")[-1] + (f" {int(float(e['progress']) * 100)}%" if isinstance(e.get("progress"), (int, float)) and e["type"].endswith("progress") else "") for e in events]
+        if steps:
+            sentences.append(f"Events of the job: {' → '.join(steps)} (from {events[0]['at']}).")
+        return sentences
     if item["kind"] == "restart":
         sentences.append(f"{name}{where} was restarted at {clock(item['opened_at'])}: {item['detail']}.")
     else:

@@ -15,6 +15,20 @@ function Context({ item, t, lang }) {
         ))}
       </ul>
       {!item.context_final && <div className="help">{t("context_pending")}</div>}
+      {ctx.job && (
+        <div>
+          <div className="label">{t("job_label")}</div>
+          <div className="num" data-testid="job-context">
+            {ctx.job.title}{ctx.job.kind ? ` · ${ctx.job.kind}` : ""}{ctx.job.error ? ` · ${ctx.job.error}` : ""}
+            {ctx.job.url ? <> · <a href={ctx.job.url} target="_blank" rel="noreferrer">{ctx.job.url}</a></> : null}
+          </div>
+          {ctx.job_events?.length > 0 && (
+            <div className="help num">
+              {t("job_events")}: {ctx.job_events.map((e) => `${e.type.split(".").pop()}${typeof e.progress === "number" && e.type.endsWith("progress") ? ` ${Math.round(e.progress * 100)}%` : ""}`).join(" → ")}
+            </div>
+          )}
+        </div>
+      )}
       {ctx.correlated?.length > 0 && (
         <div>
           <div className="label">{t("what_else")}</div>
@@ -145,7 +159,8 @@ export default function Incidents({ param }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="dot" style={{ background: item.open ? "var(--danger)" : item.kind === "restart" ? "var(--warn)" : "var(--ok)" }} />
                   <span className="font-semibold">{item.name}</span>
-                  <span className="chip">{item.kind === "restart" ? "restart" : `${item.from_state} → ${item.to_state}`}</span>
+                  {item.kind === "job" && <span className="chip chip-job" data-testid="job-chip" style={{ color: "var(--warn)" }}>{t("job_chip")}</span>}
+                  <span className="chip">{item.kind === "restart" ? "restart" : item.kind === "job" ? t("job_failed_chip") : `${item.from_state} → ${item.to_state}`}</span>
                   <span className="help num">{clock(item.opened_at, lang)}</span>
                   <span className="help">· {end ? `${t("lasted")} ${duration(end - item.opened_at)}` : `${t("still_open")} (${duration(now - item.opened_at)})`}</span>
                   <span className="help ml-auto">#{item.id}</span>
