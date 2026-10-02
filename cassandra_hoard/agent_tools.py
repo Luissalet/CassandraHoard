@@ -7,7 +7,7 @@ from typing import Any, Callable, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from . import faustus_attention, views
+from . import faustus_attention, faustus_farm, views
 from .audit import secrets_audit
 from .incidents import explain
 from .poller import OK_STATES
@@ -20,6 +20,7 @@ Use it to answer: "¿está X caído?" / "is X down?" → svc_status; "¿qué pas
 Always quote the timestamps you got (local time) and the probable cause as Cassandra states it; say "probable", it is a heuristic. If Cassandra says no clear cause, keep the cause unknown. An empty bus result only means no events were stored: inspect bus_observation before claiming an agent did nothing. A foreground window from Funes shows activity, not an edit, restart or cause. Process start time is not proven service uptime. A service marked never_seen was never running while Cassandra watched: that is not an incident.
 Times accept ISO (2026-09-24T04:00), a clock time (04:00 = the last 04:00), or an age (2h, 30m, 1d).
 "¿me está esperando Faustus?" / "is Faustus waiting for me?" → faustus_attention (approvals and questions waiting on the person, stalled runs, how long each has waited).
+"¿qué está haciendo Faustus ahora?" / "what is Faustus running right now?" / "¿cuánto presupuesto queda?" → faustus_farm (every chat turn in flight with the sub-agents it started grouped under it, dispatched jobs and their workers, a night shift, workflow runs and scheduled tasks, each with state, model, age and progress; plus the period budget: window used against its pace line, GPU seconds today, failure breaker, provider cooldowns). It carries names and states, never what anyone typed. Quote its titles, states and ages; a stalled item is one that stopped sending events, not a proven failure.
 Public websites (the sites other people use, watched from outside; the list is data/sites.json): "¿está mi web caída?" / "is my website up?", "¿cuándo caduca el certificado o el dominio?" / "when does the certificate or the domain expire?" → sites_status (state, latency, certificate days left, domain days left from RDAP, last change; a domain whose RDAP answer is unknown is unknown, not fine); "¿ha estado caída esta semana?" / "was it down this week?" → site_history. A site is down only after two failed checks in a row; its incidents (kind site) also appear in svc_incidents as service site:<id>. Certificate and domain dates are checked, not guessed: quote them with their days left.
 svc_restart, svc_watch and sites_watch change things: never restart a service or edit the watch list (services or sites) unless the user explicitly asks for it."""
 
@@ -126,6 +127,10 @@ class SitesWatchArgs(BaseModel):
 
 class FaustusAttentionArgs(BaseModel):
     wait_min: float = Field(10, ge=0, le=1440, description="Waits at least this long (minutes) are listed as long waits.")
+
+
+class FaustusFarmArgs(BaseModel):
+    include_budget: bool = Field(True, description="Also return the period budget (pace, GPU seconds today, breaker, cooldowns). False = only what is running.")
 
 
 @dataclass(frozen=True)
@@ -365,6 +370,10 @@ def run_faustus_attention(services: Services, args: FaustusAttentionArgs) -> dic
     return faustus_attention.report(services.config.data_dir, wait_min=args.wait_min, clock=services.clock)
 
 
+def run_faustus_farm(services: Services, args: FaustusFarmArgs) -> dict[str, Any]:
+    return faustus_farm.report(services.config.data_dir, include_budget=args.include_budget, clock=services.clock)
+
+
 def _resolve_site(services: Services, text: str) -> dict[str, Any]:
     site = services.sites.store.find(text)
     if site is None:
@@ -440,6 +449,7 @@ TOOLS: list[Tool] = [
     Tool("audit_stats", "Counts of agent calls per app and tool, failures, slowest, busiest callers / Estadísticas de uso del agente\nOver a window (default 7 days): events by type and source, agent.call per app/tool with failed count and avg/max ms, callers, and the last failures.\nSinónimos: estadísticas, cuántas veces, herramienta más usada, fallos, uso del agente, resumen de actividad.", AuditStatsArgs, _ann(True), run_audit_stats),
     Tool("secrets_audit", "Leaked secrets in app folders: tokens, data/ ignored, tracked .env or db / Auditoría de secretos\nPer app: token file present (and its permissions), data/ in .gitignore, secret-looking files tracked by git (mcp-token, .env, *.key, databases), .env files. Read-only.\nSinónimos: secretos, tokens, fugas, .env, gitignore, seguridad, qué está en git, credenciales.", SecretsArgs, _ann(True), run_secrets),
     Tool("faustus_attention", "Is Faustus waiting for me? Approvals, questions, stalled runs / ¿Me espera Faustus? Aprobaciones pendientes\nRead from Faustus's own attention list with a read-only token: what each chat is waiting for, for how long, the long waits (≥ wait_min) and runs that stopped sending events. Says why when it cannot read it (no token, refused, Faustus down).\nSinónimos: aprobación pendiente, me espera, atascado, turno parado, pregunta abierta, Faustus esperando, atención.", FaustusAttentionArgs, _ann(True), run_faustus_attention),
+    Tool("faustus_farm", "What is Faustus running now? Runs, sub-agents, jobs, budget / ¿Qué está haciendo Faustus ahora?\nEvery chat turn in flight with the sub-agents it started, dispatched jobs and their workers, a night shift, workflow runs and scheduled tasks: title, kind, model, state, how long, progress. Plus the period budget (window used against pace, GPU seconds today, failure breaker, provider cooldowns). Names only, never message text. Says why when it cannot read it (no token, refused, Faustus down or too old).\nSinónimos: qué está corriendo, agentes en marcha, subagentes, trabajos, turno en curso, presupuesto, ritmo, GPU hoy, breaker, cooldown, Faustus ocupado.", FaustusFarmArgs, _ann(True), run_faustus_farm),
     Tool("sites_status", "Are my public websites up? Latency, certificate and domain days left / ¿Están mis webs públicas bien?\nEvery watched site (or one): up/down, HTTP status, latency, redirect, certificate days left and issuer, DNS answers, domain registration expiry (RDAP), last change, open incident, warnings.\nSinónimos: web caída, mi página, certificado, caducidad, dominio, TLS, SSL, https, renovación, disponibilidad.", SitesStatusArgs, _ann(True), run_sites_status),
     Tool("site_history", "Up/down history of one public website: changes, uptime, latency / Historial de una web pública\nState changes (down, up, certificate renewed or expiring, DNS answers changed), uptime percentage, latency avg/p95/max with a series, and its incidents with cause.\nSinónimos: historial de la web, cuándo estuvo caída, disponibilidad, uptime, latencia, certificado renovado.", SiteHistoryArgs, _ann(True), run_site_history),
     Tool("svc_restart", "Restart or start one service now (only when the user asks) / Reiniciar o arrancar un servicio ahora\nUses its restart command, the Hoard Hub launcher or the app's launch hint; recorded in the open incident. Refuses when another program holds the port.\nSinónimos: reiniciar, arrancar, levantar, relanzar, volver a encender, restart, start.", RestartArgs, _ann(False, False, False), run_restart),

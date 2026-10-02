@@ -44,5 +44,6 @@ export const api = {
   siteHistory: (id, params) => request("GET", `/api/sites/${encodeURIComponent(id)}/history`, { params }),
   watchSite: (body) => request("POST", "/api/sites", { body }),
   unwatchSite: (id) => request("DELETE", `/api/sites/${encodeURIComponent(id)}`),
+  faustusFarm: () => request("GET", "/api/faustus/farm"),
   checkSites: (site) => request("POST", "/api/sites/check", { body: site ? { site } : {} }),
 };
