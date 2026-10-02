@@ -130,7 +130,7 @@ Ejemplo de `data/sites.json` (las webs públicas; el `id` sale del host, `expect
 
 ## Herramientas MCP
 
-`mcp_server.py` es un puente stdio: pide el catálogo a la app, reenvía cada llamada con el token, nunca abre la base de datos y arranca la app si no responde (`CASSANDRA_BRIDGE_AUTOSTART=0` lo desactiva).
+`mcp_server.py` es un puente stdio (el puente de catálogo compartido de Hoard Link): pide el catálogo a la app, reenvía cada llamada con el token, nunca abre la base de datos y arranca la app si no responde (`CASSANDRA_BRIDGE_AUTOSTART=0` lo desactiva). El token de `data/mcp-token` se crea una vez y se conserva entre arranques; arrancar la app por segunda vez solo avisa de que ya está en marcha. El guardián de peticiones, las rutas del agente (resultados limitados a 20 KB), el servidor de la SPA y la capa de base de datos también vienen de los comunes compartidos de Hoard Link.
 
 | Herramienta | Qué responde | Escribe |
 |---|---|---|

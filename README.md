@@ -130,7 +130,7 @@ Optional Boop incident notifications are disabled by default. See [configuration
 
 ## MCP tools
 
-`mcp_server.py` is a stdio bridge: it fetches the catalogue from the app, proxies every call with the token, never opens the database, and starts the app itself when it is not answering (`CASSANDRA_BRIDGE_AUTOSTART=0` turns that off).
+`mcp_server.py` is a stdio bridge (the shared catalogue bridge of Hoard Link): it fetches the catalogue from the app, proxies every call with the token, never opens the database, and starts the app itself when it is not answering (`CASSANDRA_BRIDGE_AUTOSTART=0` turns that off). The token in `data/mcp-token` is created once and kept across restarts; starting the app a second time just says it is already running. The request guard, the agent routes (results capped at 20 KB), the single-page-app server and the database layer also come from the shared Hoard Link commons.
 
 | Tool | What it answers | Writes |
 |---|---|---|

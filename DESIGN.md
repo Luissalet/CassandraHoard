@@ -13,14 +13,14 @@ data/services.json ─────────────┘        │        
                                          └─> api/* (REST + /api/agent/*) <── mcp_server.py (stdio, proxy only)
 ```
 
-- **One writer**: the app process. The MCP bridge only talks HTTP to `/api/agent/*` with the token from `data/mcp-token`; it starts the app when it does not answer.
+- **One writer**: the app process. The MCP bridge only talks HTTP to `/api/agent/*` with the token from `data/mcp-token` (created once, stable across restarts); it starts the app when it does not answer (`hoard_link.bridge`).
 - **One catalogue**: `agent_tools.py` defines the tools once; `/api/agent/tools` serves it and the bridge re-exposes it, so they never disagree.
 - **Poll tick** (`Poller.tick`): system check (gap since the previous tick, boot-time change) → registry rescan every 5 min → listening ports (psutil) → parallel health probes (`httpx.AsyncClient`, trust_env off) → pid info → GPU sample → log tail → apply transitions (samples, events, incidents, auto-restart) → refresh the context of incidents younger than 3 min → hourly prune.
 - **Storage policy**: a sample is written on every state or pid change and, while up/degraded, at most every `CASSANDRA_SAMPLE_EVERY_S`; a down service is written only when it changes. Lanes are rebuilt from consecutive samples; gaps come from `events(kind='gap')` with `until_ts`.
 - **Incidents** open only on up/degraded → down/foreign or a pid change of a live service; never for services that were never up. The context is recomputed on each tick until 3 minutes after opening (`context_final`), so "what else changed" also covers what fell after.
 - **Heuristic order** (weight): reboot 100, Cassandra gap 90, ≥3 services in the same minute 80, out-of-memory in the log 75, GPU ≥95 % in the 3 min before 70, another program on the port 65, Traceback / "Killed" 60, pid replaced 60, process alive but silent 50, last log error 45, GPU jump ≥25 points 40, process gone 30, nearby changes 20. `probable_cause` = the first two.
 - **Restarts**: policy command → launcher API (`/api/apps/<id>/start|restart`) → manifest launch hint. Automatic only with the policy on, the master switch on, state `down` (never `foreign`) and under `max_per_hour` in the last hour. Children are detached, output in `data/logs/<id>.log` (which the tailer reads).
-- **Safety**: loopback guard shared by the family (`guard.py`); restart commands cannot be set by the assistant unless `CASSANDRA_AGENT_COMMANDS=1`; Cassandra refuses to stop its own pid and checks the pid start time before stopping (recycled pids).
+- **Safety**: loopback guard from the shared Hoard Link commons (`hoard_link.guard`); restart commands cannot be set by the assistant unless `CASSANDRA_AGENT_COMMANDS=1`; Cassandra refuses to stop its own pid and checks the pid start time before stopping (recycled pids).
 
 ## Design system
 
