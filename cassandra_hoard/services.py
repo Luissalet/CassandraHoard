@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import secrets
 import time
 from typing import Any, Callable, Optional
 
@@ -13,6 +12,7 @@ from .config import Config
 from .db import Database
 from .faustus_attention import Watcher as FaustusWatcher
 from .gpu import GpuReader
+from .hoard_link import tokens
 from .incidents import Incidents
 from .job_incidents import JobIncidents
 from .logs import LogStore
@@ -26,24 +26,6 @@ from .times import iso
 log = logging.getLogger("cassandra")
 
 
-def write_token(config: Config) -> str:
-    config.data_dir.mkdir(parents=True, exist_ok=True)
-    token = secrets.token_hex(32)
-    config.token_path.write_text(token, encoding="utf-8")
-    try:
-        config.token_path.chmod(0o600)
-    except OSError:
-        pass
-    return token
-
-
-def write_url(config: Config) -> None:
-    try:
-        config.url_path.write_text(f"http://127.0.0.1:{config.port}", encoding="utf-8")
-    except OSError:
-        pass
-
-
 class Services:
     def __init__(self, config: Config, *, clock_fn: Callable[[], float] = time.time, poller_kwargs: Optional[dict[str, Any]] = None,
                  restarter_kwargs: Optional[dict[str, Any]] = None, bus_kwargs: Optional[dict[str, Any]] = None,
@@ -53,8 +35,11 @@ class Services:
         self.started_at = time.time()
         config.data_dir.mkdir(parents=True, exist_ok=True)
         config.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.token = write_token(config)
-        write_url(config)
+        self.token = tokens.read_or_create_token(config.token_path)  # stable across restarts: the bridge keeps working
+        try:
+            tokens.write_url(config.url_path, f"http://127.0.0.1:{config.port}")
+        except OSError:
+            pass
         self.db = Database(config.db_path)
         self.registry = Registry(config, **(registry_kwargs or {}))
         self.logs = LogStore(self.db, config, self.registry.list, clock_fn)

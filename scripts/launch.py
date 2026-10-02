@@ -5,38 +5,34 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from cassandra_hoard.config import Config  # noqa: E402
-from cassandra_hoard.port import find_available_port  # noqa: E402
+from cassandra_hoard.hoard_link import net  # noqa: E402
+
+SERVICE = "cassandra-hoard"
 
 
 def main() -> int:
     config = Config.from_env()
-    port = config.port if config.port_strict else find_available_port(config.port)
+    if net.already_running(SERVICE, config.port):  # a second copy would only start on the next port
+        url = f"http://127.0.0.1:{config.port}"
+        print(f"Abriendo {url}", flush=True)
+        net.open_in_browser(url)
+        return 0
+    port = config.port if config.port_strict else net.find_available_port(config.port)
     url = f"http://127.0.0.1:{port}"
     env = {**os.environ, "CASSANDRA_PORT": str(port), "PORT_STRICT": "1"}
     child = subprocess.Popen([sys.executable, "-m", "cassandra_hoard"], cwd=ROOT, env=env)
-    for _ in range(150):
-        if child.poll() is not None:
-            return child.returncode or 1
-        try:
-            with urllib.request.urlopen(f"{url}/api/health", timeout=0.5) as response:
-                if response.status == 200:
-                    break
-        except Exception:
-            pass
-        time.sleep(0.2)
-    print(f"Abriendo {url}", flush=True)
-    if sys.platform == "win32":
-        os.startfile(url)  # type: ignore[attr-defined]
-    else:
-        print(f"Open {url} in your browser.")
+    if net.wait_healthy(url, SERVICE, timeout=30.0):
+        print(f"Abriendo {url}", flush=True)
+        if not net.open_in_browser(url):
+            print(f"Open {url} in your browser.")
+    elif child.poll() is not None:
+        return child.returncode or 1
     try:
         return child.wait()
     except KeyboardInterrupt:

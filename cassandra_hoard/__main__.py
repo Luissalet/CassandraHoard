@@ -2,24 +2,14 @@
 
 from __future__ import annotations
 
-import logging
-
-import uvicorn
-
-from .config import Config
-from .main import create_app
-from .port import find_available_port
+from .hoard_link.service import run_main
 
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    config = Config.from_env()
-    port = config.port if config.port_strict else find_available_port(config.port)
-    config.port = port
-    app = create_app(config)
-    print(f"Cassandra's Hoard listening on http://127.0.0.1:{port}", flush=True)
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+def main() -> int:
+    return run_main(service="cassandra-hoard", package="cassandra_hoard", default_port=5190,
+                    app_factory="cassandra_hoard.main:create_app", data_dir_env="CASSANDRA_DATA_DIR", port_env="CASSANDRA_PORT",
+                    open_browser_default=False, title="Cassandra's Hoard")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -6,15 +6,12 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .guard import parse_allowed_hosts
+from .hoard_link.appconfig import AppPaths, env_flag, env_float, env_int, env_str
+from .hoard_link.guard import parse_allowed_hosts
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PORT = 5190
 DEFAULT_HUB_URL = "http://127.0.0.1:8810"
-
-
-def _env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
 
 
 def split_paths(raw: str) -> list[str]:
@@ -26,22 +23,6 @@ def split_paths(raw: str) -> list[str]:
         else:
             parts.append(chunk)
     return [p.strip() for p in parts if p.strip()]
-
-
-def _int(raw: str, default: int, low: int, high: int) -> int:
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return default
-    return value if low <= value <= high else default
-
-
-def _float(raw: str, default: float, low: float, high: float) -> float:
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return default
-    return value if low <= value <= high else default
 
 
 @dataclass
@@ -81,16 +62,21 @@ class Config:
     sites_tick_s: float = 15.0  # how often the site watcher looks for sites whose check is due
 
     @property
+    def paths(self) -> AppPaths:
+        """The shared data-folder layout (``cassandra.db``, ``mcp-token``, ``url``, ``logs/``)."""
+        return AppPaths("cassandra", REPO_ROOT, self.data_dir, self.data_dir_configured)
+
+    @property
     def db_path(self) -> Path:
-        return self.data_dir / "cassandra.db"
+        return self.paths.db_path
 
     @property
     def token_path(self) -> Path:
-        return self.data_dir / "mcp-token"
+        return self.paths.token_path
 
     @property
     def url_path(self) -> Path:
-        return self.data_dir / "url"
+        return self.paths.url_path
 
     @property
     def services_path(self) -> Path:
@@ -102,43 +88,45 @@ class Config:
 
     @property
     def logs_dir(self) -> Path:
-        return self.data_dir / "logs"
+        return self.paths.logs_dir
 
     @classmethod
     def from_env(cls) -> "Config":
-        raw_dir = _env("CASSANDRA_DATA_DIR")
-        port = _int(_env("CASSANDRA_PORT") or _env("PORT") or str(DEFAULT_PORT), DEFAULT_PORT, 1, 65535)
-        roots = split_paths(_env("CASSANDRA_ROOTS")) or [str(REPO_ROOT.parent)]
+        raw_dir = env_str("CASSANDRA_DATA_DIR") or ""
+        port = env_int("CASSANDRA_PORT", "PORT", default=DEFAULT_PORT)
+        if not 1 <= port <= 65535:
+            port = DEFAULT_PORT
+        roots = split_paths(env_str("CASSANDRA_ROOTS") or "") or [str(REPO_ROOT.parent)]
         return cls(
             data_dir=Path(raw_dir).expanduser() if raw_dir else REPO_ROOT / "data",
             port=port,
-            port_strict=_env("PORT_STRICT") == "1",
-            poll_s=_float(_env("CASSANDRA_POLL_S"), 20.0, 2.0, 3600.0),
+            port_strict=env_flag("PORT_STRICT"),
+            poll_s=env_float("CASSANDRA_POLL_S", default=20.0, minimum=2.0, maximum=3600.0),
             roots=roots,
-            externals=_env("CASSANDRA_EXTERNALS", "1") != "0",
-            log_globs=split_paths(_env("CASSANDRA_LOG_GLOBS")),
-            default_logs=_env("CASSANDRA_DEFAULT_LOGS", "1") != "0",
-            retention_days=_int(_env("CASSANDRA_RETENTION_DAYS"), 14, 1, 3650),
-            log_max_lines=_int(_env("CASSANDRA_LOG_MAX_LINES"), 500_000, 1000, 50_000_000),
-            sample_every_s=_float(_env("CASSANDRA_SAMPLE_EVERY_S"), 60.0, 0.0, 86400.0),
-            slow_ms=_float(_env("CASSANDRA_SLOW_MS"), 3000.0, 50.0, 600_000.0),
-            auto_restart=_env("CASSANDRA_AUTO_RESTART", "1") != "0",
-            agent_commands=_env("CASSANDRA_AGENT_COMMANDS") == "1",
-            hub_url=(_env("CASSANDRA_HUB_URL") or DEFAULT_HUB_URL).rstrip("/"),
-            faustus_python=_env("CASSANDRA_FAUSTUS_PYTHON"),
-            gpu=_env("CASSANDRA_GPU", "1") != "0",
-            autostart=_env("CASSANDRA_AUTOSTART", "1") != "0",
-            port_check=_env("CASSANDRA_PORT_CHECK", "1") != "0",
-            bus=_env("CASSANDRA_BUS", "1") != "0",
-            job_incidents=_env("CASSANDRA_JOB_INCIDENTS", "1") != "0",
-            hub_registry=_env("CASSANDRA_HUB_REGISTRY", "1") != "0",
-            allowed_hosts=parse_allowed_hosts(_env("CASSANDRA_ALLOWED_HOSTS")),
+            externals=env_flag("CASSANDRA_EXTERNALS", True),
+            log_globs=split_paths(env_str("CASSANDRA_LOG_GLOBS") or ""),
+            default_logs=env_flag("CASSANDRA_DEFAULT_LOGS", True),
+            retention_days=env_int("CASSANDRA_RETENTION_DAYS", default=14, minimum=1, maximum=3650),
+            log_max_lines=env_int("CASSANDRA_LOG_MAX_LINES", default=500_000, minimum=1000, maximum=50_000_000),
+            sample_every_s=env_float("CASSANDRA_SAMPLE_EVERY_S", default=60.0, minimum=0.0, maximum=86400.0),
+            slow_ms=env_float("CASSANDRA_SLOW_MS", default=3000.0, minimum=50.0, maximum=600_000.0),
+            auto_restart=env_flag("CASSANDRA_AUTO_RESTART", True),
+            agent_commands=env_flag("CASSANDRA_AGENT_COMMANDS"),
+            hub_url=(env_str("CASSANDRA_HUB_URL") or DEFAULT_HUB_URL).rstrip("/"),
+            faustus_python=env_str("CASSANDRA_FAUSTUS_PYTHON") or "",
+            gpu=env_flag("CASSANDRA_GPU", True),
+            autostart=env_flag("CASSANDRA_AUTOSTART", True),
+            port_check=env_flag("CASSANDRA_PORT_CHECK", True),
+            bus=env_flag("CASSANDRA_BUS", True),
+            job_incidents=env_flag("CASSANDRA_JOB_INCIDENTS", True),
+            hub_registry=env_flag("CASSANDRA_HUB_REGISTRY", True),
+            allowed_hosts=parse_allowed_hosts(env_str("CASSANDRA_ALLOWED_HOSTS")),
             data_dir_configured=bool(raw_dir),
-            boop_enabled=_env("CASSANDRA_BOOP_ENABLED") == "1",
-            boop_url=_env("CASSANDRA_BOOP_URL"),
-            boop_api_key=_env("CASSANDRA_BOOP_API_KEY"),
-            faustus_wait_min=_float(_env("CASSANDRA_FAUSTUS_WAIT_MIN"), 15.0, 0.0, 1440.0),
-            public_url=_env("CASSANDRA_PUBLIC_URL"),
-            sites=_env("CASSANDRA_SITES", "1") != "0",
-            sites_tick_s=_float(_env("CASSANDRA_SITES_TICK_S"), 15.0, 1.0, 3600.0),
+            boop_enabled=env_flag("CASSANDRA_BOOP_ENABLED"),
+            boop_url=env_str("CASSANDRA_BOOP_URL") or "",
+            boop_api_key=env_str("CASSANDRA_BOOP_API_KEY") or "",
+            faustus_wait_min=env_float("CASSANDRA_FAUSTUS_WAIT_MIN", default=15.0, minimum=0.0, maximum=1440.0),
+            public_url=env_str("CASSANDRA_PUBLIC_URL") or "",
+            sites=env_flag("CASSANDRA_SITES", True),
+            sites_tick_s=env_float("CASSANDRA_SITES_TICK_S", default=15.0, minimum=1.0, maximum=3600.0),
         )
