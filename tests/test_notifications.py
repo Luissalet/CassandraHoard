@@ -104,3 +104,30 @@ def test_unrelated_events_and_invalid_incidents_are_not_forwarded():
         assert not notifier.send("agent.call", {"incident_id": 1})
         for iid in (None, True, "1", 0, -1):
             assert not notifier.send("cassandra.incident.opened", {"incident_id": iid})
+
+
+def test_a_flapping_app_reports_one_burst(tmp_path):
+    """Incidents of one service less than 30 min apart share a burst id (the hub sends one notification per burst)."""
+    h = Harness(tmp_path, {"argus": 5183})
+    sent = []
+    h.services.bus._emit = lambda type_, data: sent.append((type_, data))
+    try:
+        h.tick()
+        for _ in range(3):  # down 20 s, up 20 s, three times
+            h.net.apps[5183].mode = "down"
+            h.tick()
+            h.services.bus.report_incidents()
+            h.net.apps[5183].mode = "up"
+            h.tick()
+            h.services.bus.report_incidents()
+        opened = [d for t, d in sent if t == "cassandra.incident.opened"]
+        assert [d["burst_count"] for d in opened] == [1, 2, 3]
+        assert {d["burst_id"] for d in opened} == {opened[0]["incident_id"]}
+        h.tick(1900)  # quiet for more than 30 min: a new burst
+        h.net.apps[5183].mode = "down"
+        h.tick()
+        h.services.bus.report_incidents()
+        last = [d for t, d in sent if t == "cassandra.incident.opened"][-1]
+        assert last["burst_id"] == last["incident_id"] and last["burst_count"] == 1
+    finally:
+        h.close()

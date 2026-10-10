@@ -42,6 +42,7 @@ log = logging.getLogger("cassandra.audit")
 
 POLL_S = 10.0
 BATCH = 500
+BURST_GAP_S = 1800.0  # incidents of one service closer than this belong to the same run (one notification)
 SECRET_PATTERNS = ("mcp-token", "*.token", "token", "*.pem", "*.key", "id_rsa*", ".env", ".env.*", "*secret*",
                    "*password*", "credentials*", "*.db", "*.sqlite", "*.sqlite3")
 SECRET_FOLDERS = ("data", "data-demo", ".venv", "venv")
@@ -169,7 +170,8 @@ class BusMirror:
                     self._emit("cassandra.incident.opened", {"incident_id": iid, "app": r["service"], "kind": r["kind"],
                                                             "service_kind": "job" if r["kind"] == "job" else self._kind_of(r["service"]),
                                                             "to_state": r["to_state"], "detail": (r["detail"] or "")[:200],
-                                                            "probable_cause": (r["probable_cause"] or "")[:200]})
+                                                            "probable_cause": (r["probable_cause"] or "")[:200],
+                                                            **self._burst_of(r["service"], iid, float(r["opened_at"]))})
                     sent += 1
                 self._reported_incidents.add(iid)
             elif prev is True and not is_open:
@@ -181,6 +183,24 @@ class BusMirror:
             for k in sorted(self._seen_open)[:-200]:
                 self._seen_open.pop(k, None)
         return sent
+
+    def _burst_of(self, service: str, incident_id: int, opened_at: float) -> dict[str, Any]:
+        """An app that keeps going down and up is one story, not twenty: ``burst_id`` is the first
+        incident of the run (incidents of the same service, each opened less than ``BURST_GAP_S``
+        after the previous one closed) and ``burst_count`` how many it holds so far. The hub's
+        notify rule dedupes on it, so a flapping app sends one notification per run."""
+        burst, count, start = incident_id, 1, opened_at
+        try:
+            rows = self.db.query("SELECT id, opened_at, closed_at FROM incidents WHERE service = ? AND id < ? AND kind NOT IN ('restart', 'job') "
+                                 "ORDER BY id DESC LIMIT 200", (service, incident_id))
+        except Exception:  # noqa: BLE001
+            rows = []
+        for row in rows:
+            closed = row["closed_at"]
+            if closed is not None and start - float(closed) > BURST_GAP_S:
+                break
+            burst, count, start = int(row["id"]), count + 1, float(row["opened_at"])
+        return {"burst_id": burst, "burst_count": count}
 
     def _kind_of(self, service_id: str) -> str:
         if self._service_kind is None:
