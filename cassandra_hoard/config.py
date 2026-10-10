@@ -41,6 +41,7 @@ class Config:
     log_max_lines: int = 500_000
     sample_every_s: float = 60.0  # an unchanged state is stored at most this often
     slow_ms: float = 3000.0  # a health answer slower than this is "degraded"
+    hung_after_s: float = 60.0  # a process that still listens but does not answer is "degraded" this long before "down"
     auto_restart: bool = True  # master switch for the per-service opt-in restart policies
     agent_commands: bool = False  # may the assistant set restart commands through svc_watch?
     hub_url: str = DEFAULT_HUB_URL
@@ -110,6 +111,7 @@ class Config:
             log_max_lines=env_int("CASSANDRA_LOG_MAX_LINES", default=500_000, minimum=1000, maximum=50_000_000),
             sample_every_s=env_float("CASSANDRA_SAMPLE_EVERY_S", default=60.0, minimum=0.0, maximum=86400.0),
             slow_ms=env_float("CASSANDRA_SLOW_MS", default=3000.0, minimum=50.0, maximum=600_000.0),
+            hung_after_s=env_float("CASSANDRA_HUNG_AFTER_S", default=60.0, minimum=0.0, maximum=3600.0),
             auto_restart=env_flag("CASSANDRA_AUTO_RESTART", True),
             agent_commands=env_flag("CASSANDRA_AGENT_COMMANDS"),
             hub_url=(env_str("CASSANDRA_HUB_URL") or DEFAULT_HUB_URL).rstrip("/"),

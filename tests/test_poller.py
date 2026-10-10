@@ -62,6 +62,13 @@ def test_hung_process_and_foreign_and_degraded(harness):
     harness.net.apps[5184].mode = "down"
     harness.services.poller.listeners_fn = lambda: {5183: 6183, 5184: 6184, 5185: 6185}
     harness.tick()
+    # Alive and listening: busy until it has not answered for hung_after_s (60 s).
+    assert states(harness)["borges"] == "degraded" and harness.services.incidents.open_for("borges") is None
+    assert "confirming" in harness.services.poller.current["borges"].detail
+    harness.tick(20)
+    harness.tick(20)
+    assert harness.services.incidents.open_for("borges") is None
+    harness.tick(20)
     incident = harness.services.incidents.open_for("borges")
     assert incident["to_state"] == "down" and "still alive but does not answer" in incident["probable_cause"]
     harness.net.apps[5185].mode = "foreign"
@@ -134,3 +141,35 @@ def test_lanes_and_history_views(harness):
     assert 40 < pct < 100
     hist = views.history(harness.services.db, "argus", now - 3600, now)
     assert [(c["from"], c["to"]) for c in hist["changes"]] == [("up", "down"), ("down", "up")]
+
+
+def test_a_busy_process_that_answers_again_opens_no_incident(harness):
+    harness.tick()
+    harness.services.poller.listeners_fn = lambda: {5183: 6183, 5184: 6184, 5185: 6185}
+    harness.alive[6184] = True
+    harness.net.apps[5184].mode = "down"
+    harness.tick()
+    harness.tick(20)
+    assert states(harness)["borges"] == "degraded"
+    harness.net.apps[5184].mode = "up"
+    harness.tick(20)
+    assert states(harness)["borges"] == "up"
+    # A second busy spell starts its own 60 s count: the first one does not carry over.
+    harness.net.apps[5184].mode = "down"
+    harness.tick(20)
+    harness.tick(20)
+    assert states(harness)["borges"] == "degraded"
+    assert harness.services.incidents.list() == []
+
+
+def test_a_closed_port_is_down_at_once_and_zero_disables_the_wait(tmp_path):
+    h = Harness(tmp_path, {"argus": 5183, "borges": 5184}, hung_after_s=0.0)
+    try:
+        h.tick()
+        h.services.poller.listeners_fn = lambda: {5183: 6183, 5184: 6184}
+        h.alive[6184] = True
+        h.net.apps[5184].mode = "down"
+        h.tick()
+        assert states(h)["borges"] == "down" and h.services.incidents.open_for("borges")
+    finally:
+        h.close()

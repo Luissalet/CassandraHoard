@@ -4,7 +4,11 @@ and incidents.
 
 States: ``up`` (answers as expected), ``degraded`` (answers with an HTTP
 error or slower than ``CASSANDRA_SLOW_MS``), ``foreign`` (something else
-answers on that port), ``down`` (nothing answers). A service that has never
+answers on that port), ``down`` (nothing answers). A process that still
+listens on its port but does not answer is usually busy (a loaded PC, a long
+request): it stays ``degraded`` until it has not answered for
+``CASSANDRA_HUNG_AFTER_S`` (60 s), and only then is ``down`` with an
+incident. A closed port is ``down`` at once. A service that has never
 been up is shown as ``never_seen`` and never opens an incident.
 
 Before any HTTP probe the listening ports are read once (psutil): a closed
@@ -125,6 +129,7 @@ class Poller:
         self._thread: Optional[threading.Thread] = None
         self._last_rescan = 0.0
         self._last_prune = 0.0
+        self._unanswered: dict[str, float] = {}  # service -> first failed probe while its port still listens
         self._load_state()
 
     # ---------- state ----------
@@ -303,8 +308,23 @@ class Poller:
                 )
         self.gpu_now = [{**s.to_dict(), "ts": now} for s in samples]
 
+    def _confirm_unanswered(self, service, prev: Optional[Current], probe: Probe, now: float) -> Probe:
+        """A failed probe while the port still listens (the pid is known) is not ``down`` yet: the
+        process is alive and usually busy. It reads as ``degraded`` until it has failed for
+        ``hung_after_s``; then the probe goes through and the incident opens."""
+        if probe.state != "down" or not probe.pid:
+            self._unanswered.pop(service.id, None)
+            return probe
+        first = self._unanswered.setdefault(service.id, now)
+        waited = now - first
+        if prev and prev.state in OK_STATES and waited < float(getattr(self.config, "hung_after_s", 0.0) or 0.0):
+            return Probe("degraded", None, f"{probe.detail or 'no answer'} for {waited:.0f} s while the port still listens; confirming",
+                         None, probe.pid, probe.proc)
+        return probe
+
     def _apply(self, service, probe: Probe, now: float, system: dict[str, Any]) -> Optional[dict[str, Any]]:
         prev = self.current.get(service.id)
+        probe = self._confirm_unanswered(service, prev, probe, now)
         prev_state = prev.state if prev else None
         changed = prev_state != probe.state
         proc = probe.proc
