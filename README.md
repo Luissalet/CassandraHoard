@@ -127,7 +127,31 @@ Optional Boop incident notifications are disabled by default. See [configuration
 
 ## API
 
-`GET /api/health` (`{"service": "cassandra-hoard", ...}`), `/api/status`, `/api/services`, `/api/services/{id}`, `/api/services/{id}/history`, `/api/lanes?hours=24`, `/api/incidents` (`since`, `until`, `at`, `window_min`, `service`, `open_only`), `/api/incidents/{id}`, `/api/logs` (`q`, `service`, `level`, time window), `/api/logs/sources`, `/api/gpu`, `/api/settings`; `POST /api/poll`, `POST /api/services` (add/edit), `DELETE /api/services/{id}`, `PUT /api/services/{id}/policy`, `POST /api/services/{id}/restart`; the websites: `GET /api/sites?hours=24`, `GET /api/sites/{id}/history`, `POST /api/sites` (add/edit), `POST /api/sites/check` (check now), `DELETE /api/sites/{id}`; `GET /api/faustus/farm` (what Faustus is running now, or why it cannot be read), `GET /api/agent/tools`, `POST /api/agent/call` (Bearer token from `data/mcp-token`). Times accept ISO (`2026-09-24T04:00`), a clock time (`04:00` = the last 04:00) or an age (`2h`, `30m`, `1d`).
+`GET /api/health` (`{"service": "cassandra-hoard", ...}`), `/api/status`, `/api/services`, `/api/services/{id}`, `/api/services/{id}/history`, `/api/lanes?hours=24`, `/api/incidents` (`since`, `until`, `at`, `window_min`, `service`, `open_only`), `/api/incidents/{id}`, `/api/logs` (`q`, `service`, `level`, time window), `/api/logs/sources`, `/api/gpu`, `/api/settings`; `POST /api/poll`, `POST /api/services` (add/edit), `DELETE /api/services/{id}`, `PUT /api/services/{id}/policy`, `POST /api/services/{id}/restart`; the websites: `GET /api/sites?hours=24`, `GET /api/sites/{id}/history`, `POST /api/sites` (add/edit), `POST /api/sites/check` (check now), `DELETE /api/sites/{id}`; `GET /api/faustus/farm` (what Faustus is running now, or why it cannot be read), `GET /api/agent/tools`, `POST /api/agent/call` (Bearer token from `data/mcp-token`); the assistant panel: `GET /api/copilot/info`, `GET /api/copilot/panel.js`, `/api/copilot/proxy`, `GET /api/copilot/launcher.js` (see *Faustus assistant panel*). Times accept ISO (`2026-09-24T04:00`), a clock time (`04:00` = the last 04:00) or an age (`2h`, `30m`, `1d`).
+
+## Faustus assistant panel
+
+Every page has a floating **Faustus** button (bottom right) that opens the Faustus assistant in a side panel, with one
+conversation kept across reloads. The server side comes from the shared Hoard Link (`install_spa` mounts the relay and adds
+the launcher to the HTML: `GET /api/copilot/info`, `GET /api/copilot/panel.js`, `/api/copilot/proxy`,
+`GET /api/copilot/launcher.js`); the UI tells the panel what is on screen through `window.hoardCopilot.context()`
+(`client/src/copilot-context.js`). What each turn carries, beside the page route and title:
+
+| View | Real objects sent (`active_objects`) | Unsaved input (`view.editor`) |
+|---|---|---|
+| Panel | the expanded service (`service`: state, port, group, restart policy), the expanded website (`site`: state, latency, certificate and domain days) | the website edit rows and the "add website" row |
+| Incidents | the open incident (`incident`, from `#/incidents/<id>` or the expanded card: kind, states, opening and closing time, probable cause) | the filter form when it differs from the search on screen |
+| GPU | each GPU now (`gpu`: memory, load) | |
+| Logs, Audit | the service filtered on (`service`) | the filter form when it differs from the search on screen |
+| Services | every watched service (`service` with its restart policy) | the typed maximum restarts per hour and restart command, the "add service" form |
+
+The filters that produced the results on screen go in `view.filters`. When the assistant finishes a turn the open view
+reloads in place (status, services, lanes, websites, the last search of Incidents, Logs and Audit); what is being typed is
+left alone. Website edits and restart policies are saved as patches: only the fields the user changed are sent, so a change
+made by the assistant in the meantime is not overwritten by the form.
+
+Turn it off with `HOARD_COPILOT=0` in the environment (or `install_spa(app, STATIC_DIR, copilot=False)`); the manifest
+declares the panel under `x-family.copilot` in `faustus-plugin.json`.
 
 ## MCP tools
 

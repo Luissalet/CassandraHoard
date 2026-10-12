@@ -1,13 +1,29 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import { useApp } from "../App.jsx";
 import { StatePill } from "../components/ui.jsx";
+import { rebaseForm } from "../copilot-context.js";
+import { useCopilotRefresh, useCopilotView } from "../copilot-view.js";
 
 function PolicyRow({ service, userIds, onSaved, t }) {
   const { act } = useApp();
   const [policy, setPolicy] = useState(service.restart);
   const [cmd, setCmd] = useState(Array.isArray(service.restart.cmd) ? JSON.stringify(service.restart.cmd) : service.restart.cmd || "");
   const [method, setMethod] = useState(null);
+
+  // A refreshed policy (the assistant changed it) updates the fields the user did not touch and keeps what is being typed.
+  const cmdBase = Array.isArray(service.restart.cmd) ? JSON.stringify(service.restart.cmd) : service.restart.cmd || "";
+  const restartJson = JSON.stringify(service.restart);
+  const previous = useRef({ policy: service.restart, cmd: cmdBase });
+  useEffect(() => {
+    setPolicy((current) => rebaseForm(previous.current.policy, service.restart, current));
+    setCmd((current) => (current === previous.current.cmd ? cmdBase : current));
+    previous.current = { policy: service.restart, cmd: cmdBase };
+  }, [restartJson]); // eslint-disable-line react-hooks/exhaustive-deps
+  const typed = {};
+  if (policy.max_per_hour !== service.restart.max_per_hour) typed.max_per_hour = policy.max_per_hour;
+  if (cmd !== cmdBase) typed.cmd = cmd;
+  useCopilotView(`policy-field:${service.id}`, Object.keys(typed).length ? { id: service.id, fields: typed } : null);
 
   useEffect(() => {
     api.service(service.id).then((d) => setMethod(d.restart_method)).catch(() => {});
@@ -78,6 +94,8 @@ function AddService({ onSaved, t }) {
   const { act } = useApp();
   const empty = { id: "", name: "", url: "http://127.0.0.1:", health_path: "/health", log_paths: "" };
   const [form, setForm] = useState(empty);
+  const typedFields = Object.fromEntries(Object.entries(form).filter(([key, value]) => value !== empty[key]));
+  useCopilotView("service-add", Object.keys(typedFields).length ? { fields: typedFields } : null);
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
   const submit = async (e) => {
     e.preventDefault();
@@ -122,6 +140,7 @@ export default function Settings() {
   useEffect(() => {
     load();
   }, [load]);
+  useCopilotRefresh(load);
 
   const userIds = new Set((settings?.user_services || []).map((e) => e.id));
 
@@ -139,7 +158,7 @@ export default function Settings() {
           <span />
         </div>
         {services.map((service) => (
-          <PolicyRow key={`${service.id}-${JSON.stringify(service.restart)}`} service={service} userIds={userIds} onSaved={load} t={t} />
+          <PolicyRow key={service.id} service={service} userIds={userIds} onSaved={load} t={t} />
         ))}
       </section>
       <AddService onSaved={load} t={t} />

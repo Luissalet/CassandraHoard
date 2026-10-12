@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
+import { useCopilotRefresh, useCopilotView, useFiltersView } from "../copilot-view.js";
 import { useApp } from "../App.jsx";
 import { Empty } from "../components/ui.jsx";
 import { clock } from "../format.js";
@@ -23,8 +24,12 @@ export default function Audit({ query }) {
   const [stats, setStats] = useState(null);
   const [secrets, setSecrets] = useState(null);
   const [error, setError] = useState(null);
+  const [applied, setApplied] = useState(form);
+  const appliedRef = useRef(form);
 
   const load = useCallback(async (f) => {
+    appliedRef.current = f;
+    setApplied(f);
     try {
       setData(await api.audit({ q: f.q, type: f.type, source: f.source, failed: f.failed, since: f.at ? undefined : f.since, at: f.at || undefined, window_min: f.at ? 15 : undefined, limit: 300 }));
       setError(null);
@@ -37,6 +42,9 @@ export default function Audit({ query }) {
     api.auditStats({ since: "7d" }).then(setStats).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useFiltersView(applied, form);
+  useCopilotRefresh(() => { load(appliedRef.current); api.auditStats({ since: "7d" }).then(setStats).catch(() => {}); });
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const submit = (e) => { e.preventDefault(); load(form); };

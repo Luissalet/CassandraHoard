@@ -126,7 +126,31 @@ Ejemplo de `data/sites.json` (las webs públicas; el `id` sale del host, `expect
 
 ## API
 
-`GET /api/health` (`{"service": "cassandra-hoard", ...}`), `/api/status`, `/api/services`, `/api/services/{id}`, `/api/services/{id}/history`, `/api/lanes?hours=24`, `/api/incidents` (`since`, `until`, `at`, `window_min`, `service`, `open_only`), `/api/incidents/{id}`, `/api/logs` (`q`, `service`, `level`, intervalo), `/api/logs/sources`, `/api/gpu`, `/api/settings`; `POST /api/poll`, `POST /api/services` (añadir/editar), `DELETE /api/services/{id}`, `PUT /api/services/{id}/policy`, `POST /api/services/{id}/restart`; las webs: `GET /api/sites?hours=24`, `GET /api/sites/{id}/history`, `POST /api/sites` (añadir/editar), `POST /api/sites/check` (comprobar ahora), `DELETE /api/sites/{id}`; `GET /api/faustus/farm` (qué está corriendo Faustus ahora, o por qué no se puede leer), `GET /api/agent/tools`, `POST /api/agent/call` (token Bearer de `data/mcp-token`). Las horas aceptan ISO (`2026-09-24T04:00`), una hora del día (`04:00` = las últimas 04:00) o una antigüedad (`2h`, `30m`, `1d`).
+`GET /api/health` (`{"service": "cassandra-hoard", ...}`), `/api/status`, `/api/services`, `/api/services/{id}`, `/api/services/{id}/history`, `/api/lanes?hours=24`, `/api/incidents` (`since`, `until`, `at`, `window_min`, `service`, `open_only`), `/api/incidents/{id}`, `/api/logs` (`q`, `service`, `level`, intervalo), `/api/logs/sources`, `/api/gpu`, `/api/settings`; `POST /api/poll`, `POST /api/services` (añadir/editar), `DELETE /api/services/{id}`, `PUT /api/services/{id}/policy`, `POST /api/services/{id}/restart`; las webs: `GET /api/sites?hours=24`, `GET /api/sites/{id}/history`, `POST /api/sites` (añadir/editar), `POST /api/sites/check` (comprobar ahora), `DELETE /api/sites/{id}`; `GET /api/faustus/farm` (qué está corriendo Faustus ahora, o por qué no se puede leer), `GET /api/agent/tools`, `POST /api/agent/call` (token Bearer de `data/mcp-token`); el panel del asistente: `GET /api/copilot/info`, `GET /api/copilot/panel.js`, `/api/copilot/proxy`, `GET /api/copilot/launcher.js` (véase *Panel del asistente Faustus*). Las horas aceptan ISO (`2026-09-24T04:00`), una hora del día (`04:00` = las últimas 04:00) o una antigüedad (`2h`, `30m`, `1d`).
+
+## Panel del asistente Faustus
+
+Todas las páginas tienen un botón flotante **Faustus** (abajo a la derecha) que abre el asistente Faustus en un panel
+lateral, con una conversación que se conserva al recargar. La parte de servidor viene de Hoard Link (`install_spa` monta el
+relé y añade el lanzador al HTML: `GET /api/copilot/info`, `GET /api/copilot/panel.js`, `/api/copilot/proxy`,
+`GET /api/copilot/launcher.js`); la interfaz le cuenta al panel qué hay en pantalla con `window.hoardCopilot.context()`
+(`client/src/copilot-context.js`). Qué lleva cada turno, además de la ruta y el título:
+
+| Vista | Objetos reales enviados (`active_objects`) | Entrada sin guardar (`view.editor`) |
+|---|---|---|
+| Panel | el servicio desplegado (`service`: estado, puerto, grupo, política de reinicio), la web desplegada (`site`: estado, latencia, días de certificado y de dominio) | las filas de edición de webs y la fila «añadir web» |
+| Incidentes | el incidente abierto (`incident`, de `#/incidents/<id>` o de la tarjeta desplegada: tipo, estados, hora de apertura y cierre, causa probable) | el formulario de filtros si difiere de la búsqueda en pantalla |
+| GPU | cada GPU ahora (`gpu`: memoria, carga) | |
+| Registros, Auditoría | el servicio filtrado (`service`) | el formulario de filtros si difiere de la búsqueda en pantalla |
+| Servicios | cada servicio vigilado (`service` con su política de reinicio) | el máximo de reinicios por hora y el comando escritos, el formulario «añadir servicio» |
+
+Los filtros que produjeron los resultados en pantalla van en `view.filters`. Cuando el asistente termina un turno, la vista
+abierta se recarga en el sitio (estado, servicios, carriles, webs, la última búsqueda de Incidentes, Registros y Auditoría)
+sin tocar lo que estés escribiendo. Las ediciones de webs y las políticas de reinicio se guardan como parches: solo se
+envían los campos que cambió la persona, así que un cambio del asistente entretanto no lo pisa el formulario.
+
+Se apaga con `HOARD_COPILOT=0` en el entorno (o `install_spa(app, STATIC_DIR, copilot=False)`); el manifiesto declara el
+panel en `x-family.copilot` de `faustus-plugin.json`.
 
 ## Herramientas MCP
 

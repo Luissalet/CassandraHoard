@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "./api.js";
 import { initialLang, makeT, saveLang } from "./i18n.js";
+import { useCopilotRefresh } from "./copilot-view.js";
 import Panel from "./pages/Panel.jsx";
 import Incidents from "./pages/Incidents.jsx";
 import Gpu from "./pages/Gpu.jsx";
@@ -82,6 +83,9 @@ export default function App() {
     const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  // The assistant finished a turn: reload the status (every page reloads itself the same way); typed fields stay.
+  useCopilotRefresh(refresh);
 
   const act = useCallback(
     async (fn, okMessage) => {

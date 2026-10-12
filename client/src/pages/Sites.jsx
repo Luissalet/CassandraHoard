@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api.js";
 import { useApp } from "../App.jsx";
 import { Lane, StatePill } from "../components/ui.jsx";
 import { isoClock } from "../format.js";
+import { changedFields, rebaseForm } from "../copilot-context.js";
+import { useCopilotRefresh, useCopilotView } from "../copilot-view.js";
 
 const DASH = "\u2014";
 
@@ -82,26 +84,43 @@ function Detail({ site, t, lang }) {
 }
 const parseExpect = (text) => text.split(/[\s,]+/).filter(Boolean);
 
+const baseOf = (site) => ({
+  name: site.name,
+  url: site.url,
+  expect: (site.expect_status || []).join(", "),
+  keyword: site.keyword || "",
+  interval: String(site.interval_min),
+  enabled: Boolean(site.enabled),
+});
+
+// The arguments of the update for the fields the user changed (a site edit is a patch: what the assistant changed meanwhile is kept).
+const siteUpdate = (changed) => {
+  const body = {};
+  if ("name" in changed) body.name = changed.name;
+  if ("url" in changed) body.url = changed.url;
+  if ("expect" in changed) body.expect_status = parseExpect(changed.expect);
+  if ("keyword" in changed) body.keyword = changed.keyword;
+  if ("interval" in changed) body.interval_min = Number(changed.interval);
+  if ("enabled" in changed) body.enabled = changed.enabled;
+  return body;
+};
+
 function EditRow({ site, onSave, onRemove, t }) {
-  const [form, setForm] = useState({
-    name: site.name,
-    url: site.url,
-    expect: (site.expect_status || []).join(", "),
-    keyword: site.keyword || "",
-    interval: site.interval_min,
-    enabled: site.enabled,
-  });
+  const base = useMemo(() => baseOf(site), [site.name, site.url, (site.expect_status || []).join(", "), site.keyword, site.interval_min, site.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [form, setForm] = useState(base);
+  const baseRef = useRef(base);
+  // A refreshed site (the assistant edited it) updates the fields the user did not touch and keeps the ones being typed.
+  useEffect(() => {
+    setForm((current) => rebaseForm(baseRef.current, base, current));
+    baseRef.current = base;
+  }, [base]);
+  const changed = changedFields(base, form);
+  useCopilotView(`site-form:${site.id}`, Object.keys(changed).length ? { id: site.id, fields: changed } : null);
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
-  const save = () =>
-    onSave({
-      id: site.id,
-      name: form.name,
-      url: form.url,
-      expect_status: parseExpect(form.expect),
-      keyword: form.keyword,
-      interval_min: Number(form.interval),
-      enabled: form.enabled,
-    });
+  const save = () => {
+    if (!Object.keys(changed).length) return;
+    onSave({ id: site.id, ...siteUpdate(changed) });
+  };
   return (
     <div className="flex flex-wrap items-center gap-2 border-t px-3 py-2" style={{ borderColor: "var(--line)" }} data-testid="site-edit-row">
       <input className="field flex-[1_1_130px]" value={form.name} onChange={set("name")} aria-label={t("name")} />
@@ -122,6 +141,7 @@ function EditRow({ site, onSave, onRemove, t }) {
 
 function AddRow({ onAdd, t }) {
   const [form, setForm] = useState({ url: "", name: "", keyword: "", interval: "" });
+  useCopilotView("site-add", Object.values(form).some(Boolean) ? { fields: Object.fromEntries(Object.entries(form).filter(([, v]) => v)) } : null);
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
   const add = async () => {
     const body = { url: form.url.trim() };
@@ -160,6 +180,9 @@ export default function SitesCard() {
     const timer = setInterval(load, 15000);
     return () => clearInterval(timer);
   }, [load]);
+
+  useCopilotView("sites", { open, editing });
+  useCopilotRefresh(load);
 
   const checkNow = async () => {
     setBusy(true);
@@ -223,7 +246,7 @@ export default function SitesCard() {
       {editing && (
         <div data-testid="sites-editor">
           <div className="help px-3 pt-2 text-[11px]">{t("sites_file")}: <span className="mono">{data.sites_file}</span></div>
-          {sites.map((site) => <EditRow key={`${site.id}:${site.url}:${site.interval_min}:${site.enabled}`} site={site} onSave={save} onRemove={remove} t={t} />)}
+          {sites.map((site) => <EditRow key={site.id} site={site} onSave={save} onRemove={remove} t={t} />)}
           <AddRow onAdd={save} t={t} />
         </div>
       )}

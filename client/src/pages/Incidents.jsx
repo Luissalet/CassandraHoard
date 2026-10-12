@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
+import { useCopilotRefresh, useCopilotView, useFiltersView } from "../copilot-view.js";
 import { useApp } from "../App.jsx";
 import { Empty } from "../components/ui.jsx";
 import { STATE_COLORS, clock, duration, gb } from "../format.js";
@@ -91,8 +92,12 @@ export default function Incidents({ param }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(param ? Number(param) : null);
   const [error, setError] = useState(null);
+  const [applied, setApplied] = useState(filters);
+  const appliedRef = useRef(filters); // the filters whose results are on screen (the form may hold something newer)
 
   const load = useCallback(async (f) => {
+    appliedRef.current = f;
+    setApplied(f);
     try {
       const params = { service: f.service, open_only: f.open_only || undefined, since: f.at ? undefined : f.since, at: f.at || undefined, window_min: f.at ? 30 : undefined };
       setData(await api.incidents(params));
@@ -105,7 +110,7 @@ export default function Incidents({ param }) {
   useEffect(() => {
     api.services().then((d) => setServices(d.services)).catch(() => {});
     load(filters);
-    const timer = setInterval(() => load(filters), 20000);
+    const timer = setInterval(() => load(appliedRef.current), 20000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -117,6 +122,11 @@ export default function Incidents({ param }) {
     e.preventDefault();
     load(filters);
   };
+  useCopilotView("incidents", { open });
+  useFiltersView(applied, filters);
+  // The assistant finished a turn: run the same search again (what is typed in the form is left alone).
+  useCopilotRefresh(() => load(appliedRef.current));
+
   const set = (key) => (e) => setFilters({ ...filters, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const now = Date.now() / 1000;
 

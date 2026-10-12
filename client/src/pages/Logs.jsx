@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
+import { useCopilotRefresh, useCopilotView, useFiltersView } from "../copilot-view.js";
 import { useApp } from "../App.jsx";
 import { Empty } from "../components/ui.jsx";
 import { clock } from "../format.js";
@@ -14,8 +15,12 @@ export default function Logs({ query }) {
   const [sources, setSources] = useState(null);
   const [showSources, setShowSources] = useState(false);
   const [error, setError] = useState(null);
+  const [applied, setApplied] = useState(form);
+  const appliedRef = useRef(form);
 
   const load = useCallback(async (f) => {
+    appliedRef.current = f;
+    setApplied(f);
     try {
       setData(await api.logs({ q: f.q, service: f.service, level: f.level, since: f.at ? undefined : f.since, at: f.at || undefined, window_min: f.at ? 15 : undefined, limit: 300 }));
       setError(null);
@@ -29,6 +34,9 @@ export default function Logs({ query }) {
     load(form);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useFiltersView(applied, form);
+  useCopilotRefresh(() => load(appliedRef.current));
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
   const submit = (e) => {
