@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { useApp } from "../App.jsx";
 import { Lane, StatePill } from "../components/ui.jsx";
 import SitesCard from "./Sites.jsx";
+import { useCopilotRefresh, useCopilotView } from "../copilot-view.js";
 import { STATE_COLORS, clock, duration, gb } from "../format.js";
 
 const GROUP_ORDER = ["faustus", "llm", "comfyui", "hub", "apps", "custom"];
@@ -288,6 +289,9 @@ export default function Panel() {
     const timer = setInterval(load, 15000);
     return () => clearInterval(timer);
   }, [load]);
+
+  useCopilotView("panel", { open_service: open });
+  useCopilotRefresh(load);
 
   const checkNow = async () => {
     setBusy(true);

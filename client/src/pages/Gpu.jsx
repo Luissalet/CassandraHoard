@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../api.js";
+import { useCopilotRefresh, useCopilotView } from "../copilot-view.js";
 import { useApp } from "../App.jsx";
 import { Empty } from "../components/ui.jsx";
 import { clock, gb } from "../format.js";
@@ -60,6 +61,9 @@ export default function Gpu() {
     const timer = setInterval(() => load(range), 30000);
     return () => clearInterval(timer);
   }, [load, range]);
+
+  useCopilotView("gpu", { hours: range });
+  useCopilotRefresh(() => load(range));
 
   return (
     <div className="space-y-4">

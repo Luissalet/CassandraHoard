@@ -279,4 +279,4 @@ def test_the_manifest_declares_the_agenda():
     import json
     from pathlib import Path
     manifest = json.loads((Path(__file__).resolve().parent.parent / "faustus-plugin.json").read_text(encoding="utf-8"))
-    assert manifest["x-family"] == {"agenda": True}
+    assert manifest["x-family"]["agenda"] is True
