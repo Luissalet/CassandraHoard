@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "id": "cassandra",
-  "name": "Cassandra's Hoard",
-  "purpose": "Observability for the local AI stack: which local services (the workspace, llama-server, Ollama, ComfyUI, the launcher and every Hoard app) are up, what went down and when, what else changed at that moment, what the logs said, what the GPUs were doing, whether the user's public websites are up (HTTP, TLS certificate, DNS, domain expiry), and opt-in restarts.",
+  "name": "Cassandra's Hoard · Talos",
+  "purpose": "Absorbed by Talos's Hoard. Compatibility identity only; no standalone server. Observability for the local AI stack: which local services (the workspace, llama-server, Ollama, ComfyUI, the launcher and every Hoard app) are up, what went down and when, what else changed at that moment, what the logs said, what the GPUs were doing, whether the user's public websites are up (HTTP, TLS certificate, DNS, domain expiry), and opt-in restarts.",
   "capabilities": [
     "service-status",
     "health-checks",
@@ -37,13 +37,14 @@
     "PYTHON"
   ],
   "defaults": {
-    "APP_URL": "http://127.0.0.1:5190",
+    "APP_URL": "http://127.0.0.1:5220/services",
     "TOKEN_FILE": "{CASSANDRA_DIR}/data/mcp-token",
-    "PYTHON": "{CASSANDRA_DIR}/venv/Scripts/python.exe"
+    "PYTHON": "{CASSANDRA_DIR}/venv/Scripts/python.exe",
+    "TALOS_DIR": "{CASSANDRA_DIR}/../Talos's Hoard"
   },
   "app": {
-    "url_default": "http://127.0.0.1:5190",
-    "ui_url": "{APP_URL}",
+    "url_default": "http://127.0.0.1:5220/services",
+    "ui_url": "http://127.0.0.1:5220/",
     "health": {
       "path": "/api/health",
       "expect": {
@@ -58,43 +59,43 @@
         "cassandra's hoard",
         "vigía del stack local"
       ]
-    },
-    "launch_hint": {
-      "kind": "process",
-      "executable": "{PYTHON}",
-      "argv": [
-        "-m",
-        "cassandra_hoard"
-      ],
-      "cwd": "{CASSANDRA_DIR}",
-      "env": {
-        "PORT_STRICT": "1",
-        "CASSANDRA_PORT": "5190"
-      },
-      "readiness": {
-        "url": "{APP_URL}/api/health",
-        "timeout_s": 30
-      }
     }
   },
   "mcp": {
     "transport": "stdio",
-    "command": "{PYTHON}",
+    "command": "{TALOS_DIR}/.venv/Scripts/python.exe",
     "args": [
-      "{CASSANDRA_DIR}/mcp_server.py"
+      "{TALOS_DIR}/mcp_server.py"
     ],
     "env": {
-      "CASSANDRA_URL": "{APP_URL}",
-      "CASSANDRA_TOKEN_FILE": "{TOKEN_FILE}"
+      "TALOS_URL": "http://127.0.0.1:5220",
+      "TALOS_TOKEN_FILE": "{TALOS_DIR}/data/mcp-token"
     },
     "optional_env": [
-      "CASSANDRA_BRIDGE_AUTOSTART",
-      "CASSANDRA_DATA_DIR"
+      "TALOS_DATA_DIR"
     ]
   },
   "x-family": {
     "agenda": true,
-    "copilot": {"provider": "faustus", "contract": "1.0", "panel": "/api/copilot/panel.js", "context": ["service", "site", "incident", "gpu", "filters", "editor"]}
+    "copilot": {
+      "provider": "faustus",
+      "contract": "1.0",
+      "panel": "/api/copilot/panel.js",
+      "context": [
+        "service",
+        "site",
+        "incident",
+        "gpu",
+        "filters",
+        "editor"
+      ]
+    },
+    "absorbed_by": {
+      "id": "talos",
+      "repository": "https://github.com/Luissalet/TalosHoard",
+      "module": "services",
+      "standalone": false
+    }
   },
-  "notes": "Keep the app running (python -m cassandra_hoard) so it keeps watching: the MCP bridge proxies every call to the local server, never opens the database, and starts the app itself when it is not answering. Probable causes are heuristics: quote them as probable. faustus_attention and faustus_farm read the user's Faustus with read-only tokens (attention:read, farm:read): what is waiting for the person, and what is running right now (chat turns with their sub-agents grouped under them, dispatched jobs, workflows, the period budget); they carry names and states, never message text, and say why when Faustus cannot be read. sites_status and site_history read the public websites Cassandra checks from outside (state, latency, certificate days, domain expiry); svc_restart, svc_watch and sites_watch change things and are only for when the user asks; restart commands can only be set from the UI or data/services.json unless CASSANDRA_AGENT_COMMANDS=1. A failed job reported on the family bus opens an incident of kind job (closed by a later success of the same app and job kind, or after 24 h); open incidents are answered to the hub's agenda."
+  "notes": "Absorbed by Talos's Hoard: https://github.com/Luissalet/TalosHoard. Launch the merged app explicitly; this identity preserves existing family calls and data. Keep the app running (python -m cassandra_hoard) so it keeps watching: the MCP bridge proxies every call to the local server, never opens the database, and starts the app itself when it is not answering. Probable causes are heuristics: quote them as probable. faustus_attention and faustus_farm read the user's Faustus with read-only tokens (attention:read, farm:read): what is waiting for the person, and what is running right now (chat turns with their sub-agents grouped under them, dispatched jobs, workflows, the period budget); they carry names and states, never message text, and say why when Faustus cannot be read. sites_status and site_history read the public websites Cassandra checks from outside (state, latency, certificate days, domain expiry); svc_restart, svc_watch and sites_watch change things and are only for when the user asks; restart commands can only be set from the UI or data/services.json unless CASSANDRA_AGENT_COMMANDS=1. A failed job reported on the family bus opens an incident of kind job (closed by a later success of the same app and job kind, or after 24 h); open incidents are answered to the hub's agenda."
 }

@@ -1,3 +1,7 @@
+> **Absorbed by [Talos's Hoard](https://github.com/Luissalet/TalosHoard).** All functions and stored data continue in the merged app. This repository is retained as historical source; its Hub entry provides compatibility only and cannot launch a standalone server. Start Talos's Hoard and explicitly enable the modules you need; all default OFF. Existing data stays in its original folders.
+>
+> The documentation below describes the incorporated engine. Use the linked repository for current installation and operation.
+
 # Cassandra's Hoard
 
 Observability for the whole local AI stack on your PC. It watches every local service you run — the Faustus workspace and its test instances, llama-server, Ollama, ComfyUI, the Hoard Hub launcher and every Hoard app — and remembers **what is up, what went down and when, what else changed at that same moment, what the logs said and what the GPUs were doing**. When something stops at 04:00 and nobody knows why, Cassandra has the answer (or the most probable one). An assistant reaches the same data through MCP, so you can simply ask "why did Borges stop last night?".
